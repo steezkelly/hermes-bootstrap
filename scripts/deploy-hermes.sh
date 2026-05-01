@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════
-# HERMES OS — Deploy Script
+# HERMES OS — Deploy Script  (v2)
 # ═══════════════════════════════════════════════════════════════════════════
 # USB boot stick → NixOS installer → Internal SSD → Hermes Agent
 #
 # USAGE:
-#   ./deploy-hermes.sh --prepare-usb /dev/sdX
-#   ./deploy-hermes.sh --install /dev/nvme0n1
-#   ./deploy-hermes.sh --all /dev/sdX /dev/nvme0n1
+#   ./deploy-hermes.sh --prepare-usb /dev/sdX           Prepare bootable USB
+#   ./deploy-hermes.sh --partition /dev/nvme0n1         Partition internal SSD
+#   ./deploy-hermes.sh --bootstrap /dev/nvme0n1        Bootstrap NixOS
+#   ./deploy-hermes.sh --all /dev/sdX /dev/nvme0n1     Full pipeline
 #
 # PREREQUISITES (on host machine):
 #   - NixOS 24.05 ISO: https://channels.nixos.org/nixos-24.05/latest-nixos-minimal-x86_64-linux.iso
-#   - Ventoy: https://github.com/Ventoy/Ventoy/releases
-#   - 226GB USB stick
-#   - Target machine with 512GB internal SSD
+#   - hermes-boot.img (built by boot-image/make-boot-image.sh)
+#   - USB stick (target machine)
+#   - Target machine with internal SSD
 #
 set -euo pipefail
 
@@ -58,6 +59,160 @@ device_info() {
   echo "Device: $dev  Size: $size  Model: $model"
 }
 
+# ─── Hardware Detection ──────────────────────────────────────────────────
+hardware_detect() {
+  local label="${1:-=== Hardware Detection ===}"
+  echo ""
+  log "${BOLD}${label}${RESET}"
+  echo ""
+  echo "Block devices:"
+  lsblk -o NAME,SIZE,TYPE,TRAN,MODEL,UUID 2>/dev/null | grep -v 'NAME' | head -20
+  echo ""
+  echo "Network interfaces:"
+  ip -br link show 2>/dev/null | grep -v 'UNKNOWN' || ip link show 2>/dev/null | grep -E '^[0-9]+:|ether'
+  echo ""
+  echo "IP addresses:"
+  ip addr show 2>/dev/null | grep -E 'inet ' | awk '{print "  "$2}' || echo "  (none)"
+  echo ""
+  if command -v iw &>/dev/null; then
+    echo "Wireless devices:"
+    iw dev 2>/dev/null | grep -E 'Interface|ssid' | paste - - 2>/dev/null || echo "  (none)"
+    echo ""
+  fi
+  echo "CPU: $(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed 's/^ *//' || echo 'unknown')"
+  echo "RAM: $(grep MemTotal /proc/meminfo 2>/dev/null | awk '{printf "%.1f GB", $2/1024/1024}')"
+  echo ""
+}
+
+# ─── USB I/O Retry Mount ─────────────────────────────────────────────────
+# Try to mount a USB device with retries and fallback mount options.
+# Usage: usb_mount "/dev/sdX1" "/mnt/point"
+usb_mount_retry() {
+  local dev="$1"
+  local mp="$2"
+  local retries="${3:-3}"
+  local options="ro"
+
+  mkdir -p "$mp"
+
+  while (( retries-- > 0 )); do
+    if mount -o "$options" "$dev" "$mp" 2>/dev/null; then
+      return 0
+    fi
+    warn "Mount failed (attempt $((3 - retries))/3). Retrying..."
+    sleep 2
+  done
+
+  # Fallback: try sync mode (slower but more reliable on weak USB)
+  warn "Standard mount failed. Trying sync mode..."
+  if mount -o sync,"$options" "$dev" "$mp" 2>/dev/null; then
+    warn "Mounted in sync mode (slow but reliable)"
+    return 0
+  fi
+
+  # Fallback: try with errors=remount-ro
+  if mount -o errors=remount-ro,"$options" "$dev" "$mp" 2>/dev/null; then
+    return 0
+  fi
+
+  return 1
+}
+
+# ─── WiFi Setup ──────────────────────────────────────────────────────────
+# Auto-detect WiFi interface and bring up network with guided fallback.
+wifi_setup() {
+  local max_wait="${1:-5}"
+
+  # Find wireless interface
+  local wlan_iface
+  wlan_iface=$(iw dev 2>/dev/null | grep Interface | awk '{print $2}' | head -1 || true)
+
+  # Try ethernet DHCP first
+  local eth_iface
+  eth_iface=$(ip -br link show 2>/dev/null | grep -oE 'eth[0-9]+|enp[0-9]+s[0-9]+' | head -1 || true)
+  if [[ -n "$eth_iface" ]]; then
+    log "Trying ethernet ($eth_iface)..."
+    dhcpcd "$eth_iface" 2>/dev/null || dhcpcd -q "$eth_iface" 2>/dev/null || true
+    sleep 2
+    if ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
+      log "Ethernet OK — internet reachable."
+      return 0
+    fi
+  fi
+
+  # No ethernet — must use WiFi
+  if [[ -z "$wlan_iface" ]]; then
+    # Try to bring it up anyway (some adapters show as wlan by default)
+    ip link set wlan0 up 2>/dev/null || true
+    wlan_iface=$(iw dev 2>/dev/null | grep Interface | awk '{print $2}' | head -1 || true)
+  fi
+
+  if [[ -z "$wlan_iface" ]]; then
+    warn "No wireless interface found. Skipping WiFi."
+    return 1
+  fi
+
+  log "Wireless interface: $wlan_iface"
+
+  # Try saved wpa_supplicant.conf
+  if [[ -f /etc/wpa_supplicant.conf ]] && grep -q 'ssid=' /etc/wpa_supplicant.conf 2>/dev/null; then
+    log "Trying saved WiFi config..."
+    wpa_supplicant -B -i "$wlan_iface" -c /etc/wpa_supplicant.conf 2>/dev/null && {
+      dhcpcd -q "$wlan_iface" 2>/dev/null || true
+      sleep "$max_wait"
+      if ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
+        log "WiFi OK — internet reachable."
+        return 0
+      fi
+    }
+  fi
+
+  # Guided setup
+  echo ""
+  warn "No saved WiFi config. Running guided setup..."
+  echo ""
+  echo "Available networks on $wlan_iface:"
+  iw dev "$wlan_iface" scan 2>/dev/null | grep -E 'SSID:|signal:' | paste - - 2>/dev/null || echo "  (scan failed)"
+  echo ""
+
+  local ssid=""
+  local password=""
+
+  printf 'SSID: '
+  read -r ssid
+
+  if [[ -z "$ssid" ]]; then
+    warn "No SSID entered. Skipping WiFi.'
+    return 1
+  fi
+
+  printf 'Password (leave blank for open network): '
+  read -r password
+
+  if [[ -n "$password" ]]; then
+    wpa_passphrase "$ssid" "$password" > /etc/wpa_supplicant.conf
+  else
+    printf 'network={\n  ssid="%s"\n  key_mgmt=NONE\n}\n' "$ssid" > /etc/wpa_supplicant.conf
+  fi
+
+  log "Starting wpa_supplicant on $wlan_iface..."
+  wpa_supplicant -B -i "$wlan_iface" -c /etc/wpa_supplicant.conf 2>/dev/null || {
+    warn "wpa_supplicant failed. Check dmesg for driver issues."
+    return 1
+  }
+
+  dhcpcd -q "$wlan_iface" 2>/dev/null || true
+  sleep "$max_wait"
+
+  if ping -c 1 -W 5 8.8.8.8 &>/dev/null; then
+    log "WiFi OK — internet reachable."
+    return 0
+  else
+    warn "WiFi connected but internet unreachable. Check router settings."
+    return 1
+  fi
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 1: Prepare USB stick
 # ═══════════════════════════════════════════════════════════════════════════
@@ -67,11 +222,13 @@ prepare_usb() {
   check_root
   need lsblk parted mkfs.fat
 
-  log "${BOLD}Preparing USB boot stick${RESET}"
-  echo
+  log "${BOLD}Preparing USB boot stick (v2 — no Ventoy)${RESET}"
+  echo ""
+  hardware_detect "USB Preparation"
+  echo ""
   warn "ALL DATA ON $usb_dev WILL BE DESTROYED"
   device_info "$usb_dev"
-  confirm "This is the correct device" || exit 1
+  confirm "This is the correct USB device" || exit 1
 
   # Unmount any mounted partitions
   log "Unmounting existing partitions..."
@@ -84,56 +241,81 @@ prepare_usb() {
   done < <(lsblk -n -o NAME "$usb_dev" | grep -E '[0-9]$' | sed "s|^|${usb_dev}|")
   sync
 
-  # Partition
-  log "Creating GPT partition table..."
+  # ── v2: Single FAT32 partition (no Ventoy) ───────────────────────────────
+  log "Creating FAT32 partition..."
   parted -s "$usb_dev" -- mklabel gpt
+  parted -s "$usb_dev" -- mkpart primary fat32 0% 100%
+  parted -s "$usb_dev" -- set 1 boot on 2>/dev/null || true
+  parted -s "$usb_dev" -- name 1 HERMES-DATA
 
-  log "Creating 8GB FAT32 partition for Ventoy..."
-  parted -s "$usb_dev" -- mkpart primary fat32 0% 8GB
-  parted -s "$usb_dev" -- set 1 boot on 2>/dev/null || true  # legacy boot
-  parted -s "$usb_dev" -- name 1 VENTOY
-
-  # Format
   log "Formatting FAT32..."
-  mkfs.fat -F 32 -n VENTOY "${usb_dev}1" >/dev/null
+  mkfs.fat -F 32 -n HERMES-DATA "${usb_dev}1" >/dev/null
 
-  # Install Ventoy (if ventoy2disk is available)
-  if command -v ventoy2disk.sh &>/dev/null; then
-    log "Installing Ventoy bootloader..."
-    ventoy2disk.sh -i -s "$usb_dev" 2>&1 | grep -v "^Ventoy" || true
-  else
-    warn "Ventoy not installed — manual step required:"
-    echo
-    echo "  1. Download Ventoy from https://github.com/Ventoy/Ventoy/releases"
-    echo "  2. Extract and run: sudo ./Ventoy2Disk.sh -i $usb_dev"
-    echo "  3. Copy NixOS ISO to the VENTOY partition"
-    echo
-  fi
-
-  # Mount and copy bootstrap
-  log "Copying hermes-bootstrap to USB..."
+  # Mount
   local mp
-  mp=$(findmnt -n -o TARGET "${usb_dev}1" 2>/dev/null || echo "/mnt/ventoy")
+  mp=$(findmnt -n -o TARGET "${usb_dev}1" 2>/dev/null || echo "/mnt/usb")
   [[ -d "$mp" ]] || mkdir -p "$mp"
   mount "${usb_dev}1" "$mp" 2>/dev/null || mount "${usb_dev}1" "$mp" -o umask=0 || error "Cannot mount ${usb_dev}1"
 
+  # Copy hermes-bootstrap repo
+  log "Copying hermes-bootstrap to USB..."
   mkdir -p "$mp/hermes-bootstrap"
   cp -r "$(dirname "$0")/../"* "$mp/hermes-bootstrap/" 2>/dev/null || \
     cp -r . "$mp/hermes-bootstrap/"
 
-  # Download/copy NixOS ISO prompt
-  if [[ ! -f "$mp/NixOS-24.05-minimal.iso" ]]; then
-    warn "NixOS ISO not found on USB — you need to copy it:"
-    echo "  wget https://channels.nixos.org/nixos-24.05/latest-nixos-minimal-x86_64-linux.iso"
-    echo "  cp NixOS-*.iso $mp/"
+  # Check for hermes-agent-src (must be pre-bundled)
+  if [[ ! -d "$mp/hermes-bootstrap/system/nixos/hermes-agent-src" ]]; then
+    warn "hermes-agent-src not found in repo!"
+    warn "Run this BEFORE prepare-usb:"
+    echo "  ./scripts/setup-hermes-agent.sh --copy ~/.hermes/hermes-agent"
+    echo ""
+    warn "Copy hermes-agent source into the repo now:"
+    printf '  cp -r ~/.hermes/hermes-agent "$USB_MOUNT/hermes-bootstrap/system/nixos/hermes-agent-src"\n'
+    echo ""
+    if [[ -t 0 ]]; then
+      printf 'Press Enter when done, or Ctrl+C to abort... '
+      read -r
+    fi
+  fi
+
+  # Copy NixOS ISO if present locally
+  local iso_source="/home/steve/latest-nixos-minimal-x86_64-linux.iso"
+  if [[ -f "$iso_source" ]] && [[ ! -f "$mp/NixOS-24.05-minimal.iso" ]]; then
+    log "Copying NixOS ISO to USB (this may take several minutes)..."
+    cp "$iso_source" "$mp/NixOS-24.05-minimal.iso"
+  elif [[ ! -f "$mp/NixOS-"*.iso ]] && [[ ! -f "$mp/nixos-"*.iso ]]; then
+    warn "NixOS ISO not found on USB or locally."
+    echo "  Download: wget -O \"$mp/NixOS-24.05-minimal.iso\" \\"
+    echo "    https://channels.nixos.org/nixos-24.05/latest-nixos-minimal-x86_64-linux.iso"
+  fi
+
+  # ── v2: Also prepare hermes-boot.img if it exists ─────────────────────
+  local boot_img="$(dirname "$0")/../boot-image/hermes-boot.img"
+  if [[ -f "$boot_img" ]]; then
+    log "hermes-boot.img found — it will be written to a separate USB or first partition"
+    echo "  To create a dual-partition USB:"
+    echo "    1. Write boot image: sudo dd if=$boot_img of=${usb_dev} bs=4M"
+    echo "    2. Create second partition for data"
+    echo "  Or use a SEPARATE USB for the boot image."
+  else
+    warn "hermes-boot.img not found at $boot_img"
+    echo "  Build it first: cd boot-image/ && sudo ./make-boot-image.sh"
   fi
 
   sync
   umount "$mp"
 
   log "${GREEN}USB stick ready!${RESET}"
-  log "Next: Boot target machine from USB, then run --install"
-  echo
+  log ""
+  log "USB contents:"
+  lsblk -o NAME,SIZE,FSTYPE,LABEL "$usb_dev"
+  echo ""
+  log "Next: Boot target machine from USB, then run --partition + --bootstrap"
+  echo ""
+  log "NOTE: If using hermes-boot.img approach:"
+  log "  1. Write boot image to USB: sudo dd if=boot-image/hermes-boot.img of=/dev/sdX bs=4M"
+  log "  2. Boot target from USB — auto-deploy.sh runs automatically"
+  echo ""
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -145,7 +327,8 @@ partition_internal() {
   check_root
 
   log "${BOLD}Partitioning internal SSD${RESET}"
-  echo
+  hardware_detect "Internal SSD — Pre-Partition"
+  echo ""
   warn "ALL DATA ON $ssd_dev WILL BE DESTROYED"
   device_info "$ssd_dev"
   confirm "This is the correct internal SSD" || exit 1
@@ -199,6 +382,24 @@ bootstrap_nixos() {
   check_root
 
   log "${BOLD}Bootstrapping NixOS${RESET}"
+  hardware_detect "NixOS Bootstrap — Pre-Install"
+
+  # ── v2: Network bring-up before anything else ──────────────────────────
+  echo ""
+  log "${BOLD}=== Network Setup ===${RESET}"
+  if wifi_setup; then
+    log "Network ready — proceeding with installation."
+  else
+    warn "Network unavailable — installation may fail if NixOS needs to download packages."
+    if [[ -t 0 ]]; then
+      printf 'Continue anyway? [y/N]: '
+      read -r answer
+      case "${answer}" in y|yes|Y|YES) ;; *)
+        echo "Aborted."
+        exit 1
+      esac
+    fi
+  fi
 
   # Detect partitions
   local efi_dev="${ssd_dev}1"
@@ -211,9 +412,43 @@ bootstrap_nixos() {
   mkdir -p /mnt/boot/efi
   mount "$efi_dev" /mnt/boot/efi
 
+  # ── v2: Find hermes-bootstrap on any USB partition (with retry) ─────────
+  log "Looking for hermes-bootstrap on mounted devices..."
+  local found_src=""
+  for mp in /mnt/boot /mnt/boot/ventoy /mnt; do
+    if [[ -d "$mp/hermes-bootstrap" ]]; then
+      found_src="$mp/hermes-bootstrap"
+      log "Found at: $found_src"
+      break
+    fi
+  done
+
+  if [[ -z "$found_src" ]]; then
+    # Try to mount USB
+    warn "hermes-bootstrap not found. Looking for USB..."
+    for dev in /dev/sd*1 /dev/nvme*p1 /dev/sd*2 /dev/nvme*p2; do
+      [[ -b "$dev" ]] || continue
+      mkdir -p /mnt/usb-bootstrap
+      if usb_mount_retry "$dev" /mnt/usb-bootstrap; then
+        if [[ -d /mnt/usb-bootstrap/hermes-bootstrap ]]; then
+          found_src="/mnt/usb-bootstrap/hermes-bootstrap"
+          log "Found on USB at $dev"
+          break
+        fi
+        umount /mnt/usb-bootstrap 2>/dev/null || true
+      fi
+    done
+  fi
+
+  bootstrap_src="${found_src:-${bootstrap_src}}"
+
   # Copy bootstrap
-  log "Copying hermes-bootstrap to /mnt/..."
-  cp -r "$bootstrap_src" /mnt/ 2>/dev/null || error "Failed to copy bootstrap (is it mounted?)"
+  log "Copying hermes-bootstrap to /mnt..."
+  if [[ -d "$bootstrap_src" ]]; then
+    cp -r "$bootstrap_src" /mnt/hermes-bootstrap 2>/dev/null || error "Failed to copy bootstrap"
+  else
+    error "hermes-bootstrap source not found at $bootstrap_src"
+  fi
 
   # Generate hardware config
   log "Generating hardware config..."
@@ -322,41 +557,60 @@ GITEXCL_EOF
 # ═══════════════════════════════════════════════════════════════════════════
 usage() {
   cat << USAGE
-${BOLD}Hermes OS Deploy Script${RESET}
+${BOLD}Hermes OS Deploy Script (v2)${RESET}
 
 ${BOLD}USAGE:${RESET}
-  $0 --prepare-usb /dev/sdX        Copy bootstrap + ISO onto a bootable USB
-  $0 --partition /dev/nvme0n1       Partition internal SSD (interactive)
+  $0 --prepare-usb /dev/sdX        Prepare bootable USB (FAT32, copy files)
+  $0 --partition /dev/nvme0n1      Partition internal SSD (interactive)
   $0 --bootstrap /dev/nvme0n1      Bootstrap NixOS (run from NixOS installer)
-  $0 --all /dev/sdX /dev/nvme0n1   Full pipeline (prepare + partition + install)
+  $0 --all /dev/sdX /dev/nvme0n1  Full pipeline (prepare + partition + install)
 
-${BOLD}NOTE:${RESET}
-  Before --prepare-usb, make the USB bootable:
-  - dd:  sudo dd if=nixos-*.iso of=/dev/sdX bs=4M status=progress conv=fsync
-  - Ventoy: sudo ./Ventoy2Disk.sh -i /dev/sdX
+${BOLD}V2 FLOW:${RESET}
+  1. Build boot image:  cd boot-image/ && sudo ./make-boot-image.sh
+  2. Write to USB:       sudo dd if=boot-image/hermes-boot.img of=/dev/sdX bs=4M
+  3. Copy data:          (boot-image copies hermes-bootstrap + ISO to USB)
+  4. Boot target from USB → auto-deploy.sh runs automatically
+
+  OR (simpler, manual):
+  1. Run --prepare-usb to copy files to FAT32 USB
+  2. Boot target from USB into NixOS installer
+  3. Run --partition --bootstrap manually in the installer
 
 ${BOLD}EXAMPLES:${RESET}
-  # Step 1: Make bootable USB (dd write)
-  sudo dd if=latest-nixos-minimal-x86_64-linux.iso of=/dev/sdb bs=4M status=progress
+  # Full v2 USB preparation
+  git clone https://github.com/steezkelly/hermes-bootstrap.git
+  cd hermes-bootstrap
+  ./scripts/setup-hermes-agent.sh --copy ~/.hermes/hermes-agent
+  wget https://channels.nixos.org/nixos-24.05/latest-nixos-minimal-x86_64-linux.iso
+  sudo ./scripts/deploy-hermes.sh --prepare-usb /dev/sdb
 
-  # Step 2: Copy bootstrap onto the now-bootable USB
-  sudo $0 --prepare-usb /dev/sdb
+  # On target machine (NixOS installer TTY):
+  sudo ./hermes-bootstrap/scripts/deploy-hermes.sh --partition /dev/nvme0n1
+  sudo ./hermes-bootstrap/scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1
 
-  # On TARGET machine (booted from USB):
-  sudo $0 --partition /dev/nvme0n1
-  sudo $0 --bootstrap /dev/nvme0n1
+${BOLD}V1 → V2 CHANGES:${RESET}
+  - Removed Ventoy dependency (Ventoy timeout was causing gray screens)
+  - Removed SquashFS (source of I/O errors on target hardware)
+  - Added WiFi auto-config with guided fallback
+  - Added USB I/O retry logic
+  - Added hardware detection output at every step
+  - hermes-agent-src must be pre-bundled (no git clone during install)
 
-${BOLD}WHAT IT DOES:${RESET}
-  1. Mounts existing bootable USB → copies hermes-bootstrap + ISO to it
-  2. Partitions internal SSD (EFI + root)
-  3. Mounts SSD → copies bootstrap → runs nixos-install
-  4. Installs hermes-agent via flake → seeds documents
+${BOLD}VENTOY FALLBACK (if hermes-boot.img doesn't boot):${RESET}
+  If direct ISO boot fails on target hardware, fall back to Ventoy:
+    1. Download Ventoy: https://github.com/Ventoy/Ventoy/releases
+    2. Install: sudo ./Ventoy2Disk.sh -i /dev/sdX
+    3. Copy NixOS ISO to Ventoy partition
+    4. Boot → Ventoy menu → select ISO
 
 ${BOLD}POST-INSTALL:${RESET}
   After reboot:
-    ssh hermes@hermes-node.local
+    ssh steve@hermes-node.local
     systemctl status hermes-agent
     hermes status
+    # Add API key:
+    sudo nano /var/lib/hermes/secrets/hermes.env
+    sudo systemctl restart hermes-agent
 
 USAGE
 }

@@ -1,0 +1,112 @@
+#!/bin/sh
+# ═══════════════════════════════════════════════════════════════════════════
+# wifi-setup — Guided WiFi setup for hermes-bootstrap
+# ═══════════════════════════════════════════════════════════════════════════
+# Run this inside the Alpine boot environment to configure WiFi.
+# Outputs: /etc/wpa_supplicant.conf
+#
+# USAGE:
+#   wifi-setup [--iface WLAN] [--saved] [--scan]
+#
+set -euo pipefail
+
+IFACE="${1:-}"
+SCAN_ONLY=""
+SAVED=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --iface) IFACE="$2"; shift 2 ;;
+    --scan) SCAN_ONLY=1; shift ;;
+    --saved) SAVED=1; shift ;;
+    *) shift ;;
+  esac
+done
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RESET='\033[0m'
+log() { echo -e "${GREEN}[WIFI]${RESET} $*"; }
+warn() { echo -e "${YELLOW}[WARN]${RESET} $*"; }
+
+# Find wireless interface
+if [[ -z "$IFACE" ]]; then
+  IFACE=$(iw dev 2>/dev/null | grep Interface | awk '{print $2}' | head -1)
+fi
+
+if [[ -z "$IFACE" ]]; then
+  warn "No wireless interface found."
+  exit 1
+fi
+
+log "Using interface: $IFACE"
+
+# Optionally just scan and display
+if [[ -n "$SCAN_ONLY" ]]; then
+  log "Scanning for networks on $IFACE..."
+  iw dev "$IFACE" scan 2>/dev/null | grep -E 'SSID:|signal:|freq:' | paste - - - || true
+  exit 0
+fi
+
+# Try saved config first
+if [[ -f /etc/wpa_supplicant.conf ]] && grep -q 'ssid=' /etc/wpa_supplicant.conf; then
+  log "Found saved WiFi config."
+  if [[ -z "$SAVED" ]]; then
+    printf 'Use saved config? [Y/n]: '
+    read -r use_saved
+    case "${use_saved}" in n|no|N|NO) ;; *)
+      log "Using saved config."
+      wpa_supplicant -B -i "$IFACE" -c /etc/wpa_supplicant.conf 2>/dev/null && {
+        dhcpcd -q "$IFACE" 2>/dev/null || true
+        sleep 3
+        if ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1; then
+          log "Connected! Internet reachable."
+          exit 0
+        else
+          warn "Saved config failed — running setup."
+        fi
+      }
+    esac
+  fi
+fi
+
+# Guided setup
+echo ""
+echo "=== WiFi Setup ==="
+echo ""
+echo "Available networks on $IFACE:"
+iw dev "$IFACE" scan 2>/dev/null | grep -E 'SSID:|signal:' | paste - - 2>/dev/null || \
+  echo "  (scan failed — enter SSID manually)"
+echo ""
+
+printf 'SSID: '
+read -r SSID
+
+if [[ -z "$SSID" ]]; then
+  warn "No SSID entered. Skipping WiFi.'
+  exit 1
+fi
+
+printf 'Password (leave blank for open network): '
+read -r PASSWORD
+
+if [[ -n "$PASSWORD" ]]; then
+  wpa_passphrase "$SSID" "$PASSWORD" > /etc/wpa_supplicant.conf
+else
+  printf 'network={\n  ssid="%s"\n  key_mgmt=NONE\n}\n' "$SSID" > /etc/wpa_supplicant.conf
+fi
+
+log "Starting wpa_supplicant on $IFACE..."
+wpa_supplicant -B -i "$IFACE" -c /etc/wpa_supplicant.conf 2>/dev/null || {
+  warn "wpa_supplicant failed. Check dmesg for driver issues."
+  exit 1
+}
+
+log "Getting IP via DHCP..."
+dhcpcd -q "$IFACE" 2>/dev/null || true
+sleep 4
+
+if ping -c 1 -W 5 8.8.8.8 >/dev/null 2>&1; then
+  log "${GREEN}Connected! Internet reachable.${RESET}"
+  ip addr show "$IFACE" | grep 'inet '
+else
+  warn "Connected but internet unreachable. Check router/AP settings."
+fi

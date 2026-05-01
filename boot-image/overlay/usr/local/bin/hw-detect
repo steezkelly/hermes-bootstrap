@@ -1,0 +1,95 @@
+#!/bin/sh
+# ═══════════════════════════════════════════════════════════════════════════
+# hw-detect — Hardware detection report for hermes-bootstrap
+# ═══════════════════════════════════════════════════════════════════════════
+# Prints a hardware inventory of the target machine.
+# Designed to run in the Alpine boot environment and inside NixOS installer.
+#
+set -euo pipefail
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'
+BOLD='\033[1m'; RESET='\033[0m'
+
+echo ""
+printf '%s=== Hardware Detection Report ===%s\n' "$BOLD" "$RESET"
+echo ""
+
+# ── Block devices ────────────────────────────────────────────────────────
+printf '%sBlock Devices:%s\n' "$BLUE" "$RESET"
+printf '%-12s %8s %8s  %-10s  %s\n' "DEVICE" "SIZE" "TYPE" "TRAN" "MODEL/UUID"
+printf '%s\n' "---------------------------------------------------------------------------------------"
+lsblk -o NAME,SIZE,TYPE,TRAN,MODEL,UUID 2>/dev/null | grep -v 'NAME' || \
+  lsblk -o NAME,SIZE,TYPE,TRAN 2>/dev/null
+echo ""
+
+# ── Network interfaces ───────────────────────────────────────────────────
+printf '%sNetwork Interfaces:%s\n' "$BLUE" "$RESET"
+ip -br link show 2>/dev/null || ip link show
+echo ""
+printf '%sIP Addresses:%s\n' "$BLUE" "$RESET"
+ip addr show 2>/dev/null | grep -E 'inet ' || echo "  (none)"
+echo ""
+
+# ── Wireless ─────────────────────────────────────────────────────────────
+printf '%sWireless:%s\n' "$BLUE" "$RESET"
+if command -v iw &>/dev/null; then
+  for iface in $(iw dev 2>/dev/null | grep Interface | awk '{print $2}'); do
+    printf '  Interface: %s\n' "$iface"
+    iw dev "$iface" info 2>/dev/null | grep -E 'ssid|channel|txpower|phy' || true
+    iw dev "$iface" scan 2>/dev/null | grep -E 'SSID:|signal:' | paste - - 2>/dev/null || true
+    echo ""
+  done
+else
+  echo "  (iw not available)"
+fi
+echo ""
+
+# ── CPU / Memory ─────────────────────────────────────────────────────────
+printf '%sCPU / Memory:%s\n' "$BLUE" "$RESET"
+if [[ -f /proc/cpuinfo ]]; then
+  CPU_MODEL=$(grep -m1 'model name' /proc/cpuinfo 2>/dev/null | cut -d: -f2 | sed 's/^ *//' || \
+              grep -m1 'cpu ' /proc/cpuinfo | cut -d: -f2 | sed 's/^ *//' || echo "unknown")
+  CPU_CORES=$(grep -c '^processor' /proc/cpuinfo 2>/dev/null || echo "?")
+  printf '  CPU: %s (%s cores)\n' "$CPU_MODEL" "$CPU_CORES"
+fi
+if [[ -f /proc/meminfo ]]; then
+  MEM_TOTAL=$(grep MemTotal /proc/meminfo | awk '{printf "%.1f GB", $2/1024/1024}')
+  printf '  RAM: %s\n' "$MEM_TOTAL"
+fi
+echo ""
+
+# ── Disk space ────────────────────────────────────────────────────────────
+printf '%sDisk Space:%s\n' "$BLUE" "$RESET"
+df -h 2>/dev/null | grep -E '/dev/(sd|nvme|vd)' | awk '{printf "  %-20s %8s  %8s  %s\n", $1, $2, $3, $5}'
+echo ""
+
+# ── USB devices ───────────────────────────────────────────────────────────
+printf '%sUSB Devices:%s\n' "$BLUE" "$RESET"
+lsusb 2>/dev/null | head -20 || echo "  (lsusb not available)"
+echo ""
+
+# ── Bootloader / EFI ─────────────────────────────────────────────────────
+printf '%sEFI Boot Entries:%s\n' "$BLUE" "$RESET"
+if command -v efibootmgr &>/dev/null; then
+  efibootmgr -v 2>/dev/null | head -20 || echo "  (no EFI entries or efibootmgr failed)"
+else
+  echo "  (efibootmgr not available)"
+fi
+echo ""
+
+# ── Nix version ─────────────────────────────────────────────────────────
+if command -v nix &>/dev/null; then
+  printf '%sNix:%s\n' "$BLUE" "$RESET"
+  nix --version 2>/dev/null || nix-env --version 2>/dev/null || echo "  nix present (version unknown)"
+  echo ""
+fi
+
+# ── Docker ────────────────────────────────────────────────────────────────
+if command -v docker &>/dev/null; then
+  printf '%sDocker:%s\n' "$BLUE" "$RESET"
+  docker --version 2>/dev/null || echo "  docker present"
+  echo ""
+fi
+
+printf '%s=== End of Report ===%s\n' "$BOLD" "$RESET"
+echo ""

@@ -1,0 +1,16 @@
+{
+  "control": {
+    "VTOY_DEFAULT_IMAGE": "1",
+    "VTOY_DEFAULT_KBD_LAYOUT_US": true,
+    "VTOY_DESKTOP_APP_GUI_MODE": false
+  },
+  "theme": {
+    "display_mode": "ui"
+  },
+  "menu_alias": {
+    "1": {
+      "image_name": "NixOS-24.05-minimal.iso",
+      "menu_title": "NixOS 24.05 Minimal Installer"
+    }
+  }
+}
