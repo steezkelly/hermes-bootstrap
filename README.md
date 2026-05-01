@@ -72,7 +72,7 @@ hermes-bootstrap/
 
 ```bash
 # Clone this repo onto the USB or local disk
-git clone https://github.com/your/hermes-bootstrap.git
+git clone https://github.com/steezkelly/hermes-bootstrap.git
 
 # Install Ventoy (download from https://github.com/Ventoy/Ventoy/releases)
 sudo ./Ventoy2Disk.sh -i /dev/sdX
@@ -236,7 +236,7 @@ NIXOS MODULE (hermes-agent.nixosModules.default)
 SYSTEM (NixOS 24.05)
   ├── Linux kernel
   ├── systemd
-  ├── Docker (for self-modification mode)
+  ├── Docker + Ubuntu 24.04 container (agent sandbox with sudo)
   ├── Nix (flakes-enabled)
   └── SSH
 
