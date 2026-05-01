@@ -3,8 +3,8 @@
 ```
                          ┌──────────────────────────────────────┐
                          │          USB STICK (234GB)          │
-                         │   Bootable NixOS installer +       │
-                         │   hermes-bootstrap/ (FAT32)        │
+                         │   Bootable (Ventoy) — exFAT          │
+                         │   NixOS ISO + hermes-bootstrap/     │
                          └──────────┬───────────────────────────┘
                                     │ boot
                                     ▼
@@ -39,9 +39,9 @@ The system is **declarative, reproducible, and self-owned**:
 
 | Component | Details |
 |-----------|---------|
-| USB stick | 234GB (FAT32, direct ISO copy — no Ventoy required) |
+| USB stick | 234GB (exFAT, Ventoy bootloader + ISO) |
 | Internal SSD | 512GB (NixOS + hermes-agent) |
-| Bootloader | extlinux (SSD) — no Ventoy, no GRUB |
+| Bootloader | Ventoy (USB) → extlinux (SSD) |
 | Partitions | EFI (512MB) + root (495GB) |
 
 ## Directory Structure
@@ -68,7 +68,7 @@ hermes-bootstrap/
 
 ### Step 1: Prepare USB (on any Linux machine)
 
-The USB must be made bootable first, then bootstrap files are copied onto it.
+The USB is pre-loaded with Ventoy. Copy the bootstrap folder and NixOS ISO onto it.
 
 ```bash
 # Clone this repo
@@ -78,27 +78,15 @@ cd hermes-bootstrap
 # ⚠️ MANDATORY: Bundle hermes-agent source before deployment
 ./scripts/setup-hermes-agent.sh --copy ~/.hermes/hermes-agent
 
-# --- Two options for a bootable USB ---
-
-# OPTION A: Direct ISO write (simple, recommended)
 # Download NixOS ISO
 wget https://channels.nixos.org/nixos-24.05/latest-nixos-minimal-x86_64-linux.iso
-# Write ISO to USB — THIS makes it bootable (warning: destroys all data on USB)
-sudo dd if=latest-nixos-minimal-x86_64-linux.iso of=/dev/sdX bs=4M status=progress conv=fsync
 
-# OPTION B: Ventoy (multi-ISO, reusable)
-# Install Ventoy: https://github.com/Ventoy/Ventoy/releases
-sudo ./Ventoy2Disk.sh -i /dev/sdX
-cp latest-nixos-minimal-x86_64-linux.iso /path/to/ventoy/
-
-# --- Copy hermes-bootstrap onto the USB (works for both options) ---
-# After dd or Ventoy, mount the USB and run:
+# Copy bootstrap + ISO onto the Ventoy USB
 sudo ./scripts/deploy-hermes.sh --prepare-usb /dev/sdX
 ```
 
-The `deploy-hermes.sh --prepare-usb` step copies the bootstrap folder and NixOS ISO
-onto the USB as regular files. The USB is already bootable from the `dd` or Ventoy
-step above — it boots directly into the NixOS installer.
+Ventoy scans the USB for ISO files on boot — the NixOS ISO will appear in the
+Ventoy boot menu automatically.
 
 ### Step 2: Boot Target from USB
 
