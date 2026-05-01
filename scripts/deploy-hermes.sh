@@ -281,7 +281,7 @@ CFGEOF
     # Create a placeholder that the agent can fill in post-boot
     cat > /mnt/var/lib/hermes/secrets/hermes.env << 'SECRETS_EOF'
 # Secrets — fill in before first boot
-# NOUS_API_KEY=your-key-here
+# MINIMAX_API_KEY=***
 SECRETS_EOF
     chmod 0640 /mnt/var/lib/hermes/secrets/hermes.env
     warn "No hermes.env found on USB — created placeholder at /var/lib/hermes/secrets/hermes.env"
@@ -325,29 +325,32 @@ usage() {
 ${BOLD}Hermes OS Deploy Script${RESET}
 
 ${BOLD}USAGE:${RESET}
-  $0 --prepare-usb /dev/sdX        Prepare USB boot stick
+  $0 --prepare-usb /dev/sdX        Copy bootstrap + ISO onto a bootable USB
   $0 --partition /dev/nvme0n1       Partition internal SSD (interactive)
   $0 --bootstrap /dev/nvme0n1      Bootstrap NixOS (run from NixOS installer)
-  $0 --all /dev/sdX /dev/nvme0n1   Full pipeline (USB + partition + install)
-  $0 --verify /dev/nvme0n1          Verify existing installation
+  $0 --all /dev/sdX /dev/nvme0n1   Full pipeline (prepare + partition + install)
+
+${BOLD}NOTE:${RESET}
+  Before --prepare-usb, make the USB bootable:
+  - dd:  sudo dd if=nixos-*.iso of=/dev/sdX bs=4M status=progress conv=fsync
+  - Ventoy: sudo ./Ventoy2Disk.sh -i /dev/sdX
 
 ${BOLD}EXAMPLES:${RESET}
-  # On THIS machine — prepare USB boot stick:
+  # Step 1: Make bootable USB (dd write)
+  sudo dd if=latest-nixos-minimal-x86_64-linux.iso of=/dev/sdb bs=4M status=progress
+
+  # Step 2: Copy bootstrap onto the now-bootable USB
   sudo $0 --prepare-usb /dev/sdb
 
   # On TARGET machine (booted from USB):
   sudo $0 --partition /dev/nvme0n1
   sudo $0 --bootstrap /dev/nvme0n1
 
-  # Full pipeline (on target from USB):
-  sudo $0 --all /dev/sdb /dev/nvme0n1
-
 ${BOLD}WHAT IT DOES:${RESET}
-  1. Partitions USB → installs Ventoy bootloader
-  2. Copies hermes-bootstrap + NixOS ISO to USB
-  3. Partitions internal SSD (EFI + root)
-  4. Mounts SSD → copies bootstrap → runs nixos-install
-  5. Installs hermes-agent via flake → seeds documents
+  1. Mounts existing bootable USB → copies hermes-bootstrap + ISO to it
+  2. Partitions internal SSD (EFI + root)
+  3. Mounts SSD → copies bootstrap → runs nixos-install
+  4. Installs hermes-agent via flake → seeds documents
 
 ${BOLD}POST-INSTALL:${RESET}
   After reboot:

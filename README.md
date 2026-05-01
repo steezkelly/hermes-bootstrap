@@ -2,28 +2,26 @@
 
 ```
                          ┌──────────────────────────────────────┐
-                         │          USB STICK (Ventoy)          │
-                         │   226GB, bootable, portable         │
-                         │   • Ventoy bootloader               │
-                         │   • NixOS 24.05 ISO                │
-                         │   • hermes-bootstrap/              │
+                         │          USB STICK (234GB)          │
+                         │   Bootable NixOS installer +       │
+                         │   hermes-bootstrap/ (FAT32)        │
                          └──────────┬───────────────────────────┘
                                     │ boot
                                     ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                    INTERNAL SSD (512GB)                      │
 │                   NixOS 24.05 + hermes-agent                 │
-│                                                               │
+│                                                                │
 │   ┌─────────────────────────────────────────────────────┐    │
-│   │  hermes-agent.service (systemd)                     │    │
-│   │  └── hermes gateway — API + tools + skills         │    │
+│   │  hermes-agent.service (systemd)                      │    │
+│   │  └── hermes gateway — API + tools + skills        │    │
 │   └─────────────────────────────────────────────────────┘    │
-│                                                               │
+│                                                                │
 │   /var/lib/hermes/.hermes/  ← State, config, memory         │
-│   /var/lib/hermes/workspace/  ← Working directory           │
-│   /etc/nixos/  ← System config (git, versioned)            │
-│   /home/steve/  ← Interactive user home                    │
-│                                                               │
+│   /var/lib/hermes/workspace/  ← Working directory            │
+│   /etc/nixos/  ← System config (git, versioned)              │
+│   /home/steve/  ← Interactive user home                      │
+│                                                                │
 └───────────────────────────────────────────────────────────────┘
 ```
 
@@ -41,9 +39,9 @@ The system is **declarative, reproducible, and self-owned**:
 
 | Component | Details |
 |-----------|---------|
-| USB stick | 226GB (Ventoy bootloader carrier) |
+| USB stick | 234GB (FAT32, direct ISO copy — no Ventoy required) |
 | Internal SSD | 512GB (NixOS + hermes-agent) |
-| Bootloader | Ventoy (USB) → extlinux (SSD) |
+| Bootloader | extlinux (SSD) — no Ventoy, no GRUB |
 | Partitions | EFI (512MB) + root (495GB) |
 
 ## Directory Structure
@@ -70,34 +68,43 @@ hermes-bootstrap/
 
 ### Step 1: Prepare USB (on any Linux machine)
 
+The USB must be made bootable first, then bootstrap files are copied onto it.
+
 ```bash
-# Clone this repo onto the USB or local disk
+# Clone this repo
 git clone https://github.com/steezkelly/hermes-bootstrap.git
 cd hermes-bootstrap
 
 # ⚠️ MANDATORY: Bundle hermes-agent source before deployment
-# This copies your live hermes-agent from ~/.hermes/hermes-agent into hermes-agent-src/
-# The flake references this via: url = "path:./hermes-agent-src"
-# Without this step, the NixOS build will fail with "path does not exist"
 ./scripts/setup-hermes-agent.sh --copy ~/.hermes/hermes-agent
 
-# Install Ventoy (download from https://github.com/Ventoy/Ventoy/releases)
-sudo ./Ventoy2Disk.sh -i /dev/sdX
+# --- Two options for a bootable USB ---
 
+# OPTION A: Direct ISO write (simple, recommended)
 # Download NixOS ISO
 wget https://channels.nixos.org/nixos-24.05/latest-nixos-minimal-x86_64-linux.iso
-cp nixos-*.iso /path/to/ventoy/NixOS-24.05-minimal.iso
+# Write ISO to USB — THIS makes it bootable (warning: destroys all data on USB)
+sudo dd if=latest-nixos-minimal-x86_64-linux.iso of=/dev/sdX bs=4M status=progress conv=fsync
 
-# Run the deploy script
+# OPTION B: Ventoy (multi-ISO, reusable)
+# Install Ventoy: https://github.com/Ventoy/Ventoy/releases
+sudo ./Ventoy2Disk.sh -i /dev/sdX
+cp latest-nixos-minimal-x86_64-linux.iso /path/to/ventoy/
+
+# --- Copy hermes-bootstrap onto the USB (works for both options) ---
+# After dd or Ventoy, mount the USB and run:
 sudo ./scripts/deploy-hermes.sh --prepare-usb /dev/sdX
 ```
+
+The `deploy-hermes.sh --prepare-usb` step copies the bootstrap folder and NixOS ISO
+onto the USB as regular files. The USB is already bootable from the `dd` or Ventoy
+step above — it boots directly into the NixOS installer.
 
 ### Step 2: Boot Target from USB
 
 1. Insert USB into target machine
-2. Power on → BIOS/UEFI boot menu → select USB
-3. Ventoy menu → select NixOS ISO
-4. Wait for NixOS minimal installer to boot to TTY
+2. Power on → BIOS/UEFI boot menu → select USB (boot from ISO file)
+3. NixOS minimal installer boots to TTY
 
 ### Step 3: Partition Internal SSD
 
@@ -129,7 +136,7 @@ hermes tools list
 
 # Add your API key
 sudo mkdir -p /var/lib/hermes/secrets
-echo "NOUS_API_KEY=your-key-here" | sudo tee /var/lib/hermes/secrets/hermes.env
+echo "MINIMAX_API_KEY=***" | sudo tee /var/lib/hermes/secrets/hermes.env
 sudo systemctl restart hermes-agent
 ```
 
@@ -293,7 +300,7 @@ $ hermes status
   ╔══════════════════════════════════════════╗
   ║  HERMES v2.1.4                           ║
   ║  Model: minimax/minimax-m2.7             ║
-  ║  Provider: nous                           ║
+  ║  Provider: minimax                        ║
   ║  State: /var/lib/hermes/.hermes          ║
   ║  Uptime: 42m                             ║
   ║  Memory: 2.3GB indexed                   ║
