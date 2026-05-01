@@ -1,0 +1,17 @@
+# Secrets (seed from USB)
+data/secrets/hermes.env
+
+# Nix build artifacts
+result
+result-*
+
+# hermes-agent source (bundled separately via setup-hermes-agent.sh)
+hermes-agent-src/
+
+# System state (lives on the target SSD, not USB)
+var-lib-hermes/
+
+# Build caches
+.fuse_*
+*.swp
+*.swo
