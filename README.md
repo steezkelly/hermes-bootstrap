@@ -73,6 +73,13 @@ hermes-bootstrap/
 ```bash
 # Clone this repo onto the USB or local disk
 git clone https://github.com/steezkelly/hermes-bootstrap.git
+cd hermes-bootstrap
+
+# ⚠️ MANDATORY: Bundle hermes-agent source before deployment
+# This copies your live hermes-agent from ~/.hermes/hermes-agent into hermes-agent-src/
+# The flake references this via: url = "path:./hermes-agent-src"
+# Without this step, the NixOS build will fail with "path does not exist"
+./scripts/setup-hermes-agent.sh --copy ~/.hermes/hermes-agent
 
 # Install Ventoy (download from https://github.com/Ventoy/Ventoy/releases)
 sudo ./Ventoy2Disk.sh -i /dev/sdX
