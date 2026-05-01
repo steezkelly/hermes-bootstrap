@@ -62,6 +62,7 @@
               # LLM PROVIDER
               # ─────────────────────────────────────────────────────────────
               settings = {
+                provider = "minimax";
                 model = "minimax/minimax-m2.7";
                 toolsets = [ "all" ];
                 terminal.backend = "local";
