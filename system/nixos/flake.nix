@@ -9,14 +9,14 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
 
-    # The real hermes-agent (bundled at hermes-agent-src/ in this directory)
+    # The real hermes-agent from NousResearch
     hermes-agent = {
-      url = "path:./hermes-agent-src";
+      url = "github:NousResearch/hermes-agent";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
-  # ─── OUTPUTS ────────────────────────────────────────────────────────────
+  # ─── OUTPUTS ───────────────────────────────────────────────────────────
   outputs = inputs@{ self, nixpkgs, hermes-agent, ... }:
 
     {
@@ -36,6 +36,8 @@
           ./hardware-configuration.nix
 
           # 3. Hermes OS configuration
+          { config, pkgs, lib, ... }:
+
           {
             # ─────────────────────────────────────────────────────────────
             # WHO AM I
@@ -139,37 +141,27 @@
             services.hermes-agent.extraPackages = [
               # Build
               pkgs.gcc pkgs.make pkgs.cmake pkgs.pkg-config
-
               # Python
               pkgs.python3 pkgs.python3Packages.pip pkgs.python3Packages.virtualenv
-
               # Node
               pkgs.nodejs pkgs.npm
-
               # Data processing
               pkgs.jq pkgs.yq pkgs.ripgrep pkgs.fd pkgs.fzf
-
               # Core utils
-              pkgs.coreutils pkgs.findutils pkgs.gawk pkgs.sed pkgs.tar pkgs.gzip pkgs.xz pkgs.zip pkgs.unzip pkgs.p7zip
-
+              pkgs.coreutils pkgs.findutils pkgs.gawk pkgs.sed pkgs.tar
+              pkgs.gzip pkgs.xz pkgs.zip pkgs.unzip pkgs.p7zip
               # Network
               pkgs.openssh pkgs.curl pkgs.wget pkgs.rsync
-
               # Monitoring
               pkgs.htop pkgs.iotop pkgs.strace pkgs.lsof
-
               # VCS
               pkgs.git pkgs.git-lfs
-
               # Containers
               pkgs.docker pkgs.docker-compose
-
               # Media tools
               pkgs.ffmpeg pkgs.imagemagick
-
               # Security
               pkgs.pass pkgs.gnupg
-
               # Cloud sync
               pkgs.rclone
             ];
@@ -241,58 +233,6 @@
             # VIRTUALISATION (Docker)
             # ─────────────────────────────────────────────────────────────
             virtualisation.docker.enable = true;
-
-            # ─────────────────────────────────────────────────────────────
-            # BACKUP SERVICE — SQLite live backup via sqlite3.backup()
-            # Copies live WAL-mode DB without touching WAL files directly.
-            # ─────────────────────────────────────────────────────────────
-            systemd.services.hermes-backup = {
-              description = "Hermes Agent SQLite Memory Backup";
-              serviceConfig = {
-                Type = "oneshot";
-                ExecStart = let s = pkgs.writeScript "hermes-backup-sqlite" (builtins.readFile ../scripts/backup-memories.py); in "${s} /var/lib/hermes/.hermes/memories.db /var/lib/hermes/backups";
-                PrivateTmp = true;
-                NoNewPrivileges = true;
-              };
-            };
-
-            systemd.timers.hermes-backup = {
-              description = "Daily Hermes memory backup";
-              wantedBy = [ "timers.target" ];
-              timerConfig = {
-                OnCalendar = "04:00";
-                Persistent = true;
-              };
-            };
-
-            # ─────────────────────────────────────────────────────────────
-            # GIT STATE TRACKING — commits /var/lib/hermes changes every 5min.
-            # Uses git diff --quiet --cached to skip commit when nothing changed.
-            # Never tracks secrets or volatile runtime files (core dumps, sockets).
-            # ─────────────────────────────────────────────────────────────
-            systemd.services.hermes-git-track = {
-              description = "Hermes Agent Git State Tracker";
-              serviceConfig = {
-                Type = "oneshot";
-                ExecStart = let s = pkgs.writeScript "hermes-git-track" ''
-                  #!${pkgs.runtimeShell}
-                  set -eu
-                  cd /var/lib/hermes
-                  ${pkgs.git}/bin/git add .
-                  ${pkgs.git}/bin/git diff --quiet --cached && exit 0
-                  ${pkgs.git}/bin/git commit -m "state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-                ''; in "${s}";
-              };
-            };
-
-            systemd.timers.hermes-git-track = {
-              description = "Hermes Agent Git State Tracker (5min)";
-              wantedBy = [ "timers.target" ];
-              timerConfig = {
-                OnUnitActiveSec = "5min";
-                Persistent = true;
-              };
-            };
 
             # ─────────────────────────────────────────────────────────────
             # GATEWAY SECURITY — bind to localhost only.
