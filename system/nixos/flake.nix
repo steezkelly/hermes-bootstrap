@@ -247,30 +247,28 @@
             # Copies live WAL-mode DB without touching WAL files directly.
             # Backup script is a separate file in the flake for clarity.
             # ─────────────────────────────────────────────────────────────
-            # Uses mkAfter so the let binding result merges into the module
-            # instead of being a bare expression NixOS can't evaluate.
-            lib.mkAfter (let
-              backupScript = pkgs.writeScript "hermes-backup-sqlite" (builtins.readFile ../scripts/backup-memories.py);
-            in {
-              systemd.services.hermes-backup = {
-                description = "Hermes Agent SQLite Memory Backup";
-                serviceConfig = {
-                  Type = "oneshot";
-                  ExecStart = "${pkgs.python3}/bin/python3 ${backupScript} /var/lib/hermes/.hermes/memories.db /var/lib/hermes/backups";
-                  PrivateTmp = true;
-                  NoNewPrivileges = true;
-                };
+            # ─────────────────────────────────────────────────────────────
+            # BACKUP SERVICE
+            # ─────────────────────────────────────────────────────────────
+            systemd.services.hermes-backup = {
+              description = "Hermes Agent SQLite Memory Backup";
+              script = pkgs.writeScript "hermes-backup-sqlite" (builtins.readFile ../scripts/backup-memories.py);
+              serviceConfig = {
+                Type = "oneshot";
+                ExecStart = "${pkgs.python3}/bin/python3 ${pkgs.python3}/bin/python3 ${config.systemd.services.hermes-backup.script} /var/lib/hermes/.hermes/memories.db /var/lib/hermes/backups";
+                PrivateTmp = true;
+                NoNewPrivileges = true;
               };
+            };
 
-              systemd.timers.hermes-backup = {
-                description = "Daily Hermes memory backup";
-                wantedBy = [ "timers.target" ];
-                timerConfig = {
-                  OnCalendar = "04:00";
-                  Persistent = true;
-                };
+            systemd.timers.hermes-backup = {
+              description = "Daily Hermes memory backup";
+              wantedBy = [ "timers.target" ];
+              timerConfig = {
+                OnCalendar = "04:00";
+                Persistent = true;
               };
-            })
+            };
 
             # ─────────────────────────────────────────────────────────────
             # GIT STATE TRACKING — commits /var/lib/hermes changes every 5min.
