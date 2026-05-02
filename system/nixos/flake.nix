@@ -270,27 +270,20 @@
             # Uses git diff --quiet --cached to skip commit when nothing changed.
             # Never tracks secrets or volatile runtime files (core dumps, sockets).
             # ─────────────────────────────────────────────────────────────
-            (let
-              gitTrackScript = pkgs.writeScript "hermes-git-track" ''
-                #!${pkgs.runtimeShell}
-                set -eu
-                cd /var/lib/hermes
-                # Stage all non-ignored changes
-                ${pkgs.git}/bin/git add .
-                # git diff --quiet --cached exits 0 (no diff = quiet) when nothing
-                # changed, exits 1 when there are staged changes.
-                # We only commit if there are changes.
-                ${pkgs.git}/bin/git diff --quiet --cached && exit 0
-                ${pkgs.git}/bin/git commit -m "state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-              '';
-            in
             systemd.services.hermes-git-track = {
               description = "Hermes Agent Git State Tracker";
               serviceConfig = {
                 Type = "oneshot";
-                ExecStart = "${gitTrackScript}";
+                ExecStart = let s = pkgs.writeScript "hermes-git-track" ''
+                  #!${pkgs.runtimeShell}
+                  set -eu
+                  cd /var/lib/hermes
+                  ${pkgs.git}/bin/git add .
+                  ${pkgs.git}/bin/git diff --quiet --cached && exit 0
+                  ${pkgs.git}/bin/git commit -m "state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                ''; in "${pkgs.python3}/bin/python3 ${s}";
               };
-            })
+            };
 
             systemd.timers.hermes-git-track = {
               description = "Hermes Agent Git State Tracker (5min)";
