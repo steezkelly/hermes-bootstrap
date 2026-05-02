@@ -245,17 +245,12 @@
             # ─────────────────────────────────────────────────────────────
             # BACKUP SERVICE — SQLite live backup via sqlite3.backup()
             # Copies live WAL-mode DB without touching WAL files directly.
-            # Backup script is a separate file in the flake for clarity.
-            # ─────────────────────────────────────────────────────────────
-            # ─────────────────────────────────────────────────────────────
-            # BACKUP SERVICE
             # ─────────────────────────────────────────────────────────────
             systemd.services.hermes-backup = {
               description = "Hermes Agent SQLite Memory Backup";
-              script = pkgs.writeScript "hermes-backup-sqlite" (builtins.readFile ../scripts/backup-memories.py);
               serviceConfig = {
                 Type = "oneshot";
-                ExecStart = "${pkgs.python3}/bin/python3 ${pkgs.python3}/bin/python3 ${config.systemd.services.hermes-backup.script} /var/lib/hermes/.hermes/memories.db /var/lib/hermes/backups";
+                ExecStart = let s = pkgs.writeScript "hermes-backup-sqlite" (builtins.readFile ../scripts/backup-memories.py); in "${pkgs.python3}/bin/python3 ${s} /var/lib/hermes/.hermes/memories.db /var/lib/hermes/backups";
                 PrivateTmp = true;
                 NoNewPrivileges = true;
               };
