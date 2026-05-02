@@ -250,7 +250,7 @@
               description = "Hermes Agent SQLite Memory Backup";
               serviceConfig = {
                 Type = "oneshot";
-                ExecStart = let s = pkgs.writeScript "hermes-backup-sqlite" (builtins.readFile ../scripts/backup-memories.py); in "${pkgs.python3}/bin/python3 ${s} /var/lib/hermes/.hermes/memories.db /var/lib/hermes/backups";
+                ExecStart = let s = pkgs.writeScript "hermes-backup-sqlite" (builtins.readFile ../scripts/backup-memories.py); in "${s} /var/lib/hermes/.hermes/memories.db /var/lib/hermes/backups";
                 PrivateTmp = true;
                 NoNewPrivileges = true;
               };
@@ -281,7 +281,7 @@
                   ${pkgs.git}/bin/git add .
                   ${pkgs.git}/bin/git diff --quiet --cached && exit 0
                   ${pkgs.git}/bin/git commit -m "state: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-                ''; in "${pkgs.python3}/bin/python3 ${s}";
+                ''; in "${s}";
               };
             };
 
