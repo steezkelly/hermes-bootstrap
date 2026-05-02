@@ -247,7 +247,9 @@
             # Copies live WAL-mode DB without touching WAL files directly.
             # Backup script is a separate file in the flake for clarity.
             # ─────────────────────────────────────────────────────────────
-            (let
+            # Uses mkAfter so the let binding result merges into the module
+            # instead of being a bare expression NixOS can't evaluate.
+            lib.mkAfter (let
               backupScript = pkgs.writeScript "hermes-backup-sqlite" (builtins.readFile ../scripts/backup-memories.py);
             in {
               systemd.services.hermes-backup = {
