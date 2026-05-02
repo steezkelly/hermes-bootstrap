@@ -249,25 +249,26 @@
             # ─────────────────────────────────────────────────────────────
             (let
               backupScript = pkgs.writeScript "hermes-backup-sqlite" (builtins.readFile ../scripts/backup-memories.py);
-            in
-            systemd.services.hermes-backup = {
-              description = "Hermes Agent SQLite Memory Backup";
-              serviceConfig = {
-                Type = "oneshot";
-                ExecStart = "${pkgs.python3}/bin/python3 ${backupScript} /var/lib/hermes/.hermes/memories.db /var/lib/hermes/backups";
-                PrivateTmp = true;
-                NoNewPrivileges = true;
+            in {
+              systemd.services.hermes-backup = {
+                description = "Hermes Agent SQLite Memory Backup";
+                serviceConfig = {
+                  Type = "oneshot";
+                  ExecStart = "${pkgs.python3}/bin/python3 ${backupScript} /var/lib/hermes/.hermes/memories.db /var/lib/hermes/backups";
+                  PrivateTmp = true;
+                  NoNewPrivileges = true;
+                };
+              };
+
+              systemd.timers.hermes-backup = {
+                description = "Daily Hermes memory backup";
+                wantedBy = [ "timers.target" ];
+                timerConfig = {
+                  OnCalendar = "04:00";
+                  Persistent = true;
+                };
               };
             })
-
-            systemd.timers.hermes-backup = {
-              description = "Daily Hermes memory backup";
-              wantedBy = [ "timers.target" ];
-              timerConfig = {
-                OnCalendar = "04:00";
-                Persistent = true;
-              };
-            };
 
             # ─────────────────────────────────────────────────────────────
             # GIT STATE TRACKING — commits /var/lib/hermes changes every 5min.
