@@ -136,42 +136,42 @@
             # ─────────────────────────────────────────────────────────────
             # EXTRA PACKAGES available to the agent and interactive shell
             # ─────────────────────────────────────────────────────────────
-            services.hermes-agent.extraPackages = with pkgs; [
+            services.hermes-agent.extraPackages = [
               # Build
-              gcc make cmake pkg-config
+              pkgs.gcc pkgs.make pkgs.cmake pkgs.pkg-config
 
               # Python
-              python3 python3Packages.pip python3Packages.virtualenv
+              pkgs.python3 pkgs.python3Packages.pip pkgs.python3Packages.virtualenv
 
               # Node
-              nodejs npm
+              pkgs.nodejs pkgs.npm
 
               # Data processing
-              jq yq ripgrep fd fzf
+              pkgs.jq pkgs.yq pkgs.ripgrep pkgs.fd pkgs.fzf
 
               # Core utils
-              coreutils findutils gawk sed tar gzip xz zip unzip p7zip
+              pkgs.coreutils pkgs.findutils pkgs.gawk pkgs.sed pkgs.tar pkgs.gzip pkgs.xz pkgs.zip pkgs.unzip pkgs.p7zip
 
               # Network
-              openssh curl wget rsync
+              pkgs.openssh pkgs.curl pkgs.wget pkgs.rsync
 
               # Monitoring
-              htop iotop strace lsof
+              pkgs.htop pkgs.iotop pkgs.strace pkgs.lsof
 
               # VCS
-              git git-lfs
+              pkgs.git pkgs.git-lfs
 
               # Containers
-              docker docker-compose
+              pkgs.docker pkgs.docker-compose
 
               # Media tools
-              ffmpeg imagemagick
+              pkgs.ffmpeg pkgs.imagemagick
 
               # Security
-              pass gnupg
+              pkgs.pass pkgs.gnupg
 
               # Cloud sync
-              rclone
+              pkgs.rclone
             ];
 
             # ─────────────────────────────────────────────────────────────
