@@ -182,7 +182,7 @@ wifi_setup() {
   read -r ssid
 
   if [[ -z "$ssid" ]]; then
-    warn "No SSID entered. Skipping WiFi.'
+    warn "No SSID entered. Skipping WiFi."
     return 1
   fi
 
