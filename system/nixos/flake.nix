@@ -36,7 +36,7 @@
           ./hardware-configuration.nix
 
           # 3. Hermes OS configuration
-          { config, pkgs, lib, ... }:
+          ({ config, pkgs, lib, ... }:
 
           {
             # ─────────────────────────────────────────────────────────────
@@ -221,7 +221,7 @@
             # SECURITY
             # ─────────────────────────────────────────────────────────────
             security.sudo.enable = true;
-            security.kernel.randomizeAddressSpace = true;
+            boot.kernel.sysctl."kernel.randomize_va_space" = 2;
 
             # ─────────────────────────────────────────────────────────────
             # DOCUMENTATION (minimal — save space, docs in wiki)
@@ -240,7 +240,7 @@
             # bind to 127.0.0.1 and terminate TLS at the proxy.
             # ─────────────────────────────────────────────────────────────
             services.hermes-agent.settings.gateway.host = "127.0.0.1";
-          }
+          })
         ];
       };
     };

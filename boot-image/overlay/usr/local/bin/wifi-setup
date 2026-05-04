@@ -81,7 +81,7 @@ printf 'SSID: '
 read -r SSID
 
 if [[ -z "$SSID" ]]; then
-  warn "No SSID entered. Skipping WiFi.'
+  warn "No SSID entered. Skipping WiFi."
   exit 1
 fi
 

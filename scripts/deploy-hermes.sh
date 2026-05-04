@@ -283,7 +283,7 @@ prepare_usb() {
   if [[ -f "$iso_source" ]] && [[ ! -f "$mp/NixOS-24.05-minimal.iso" ]]; then
     log "Copying NixOS ISO to USB (this may take several minutes)..."
     cp "$iso_source" "$mp/NixOS-24.05-minimal.iso"
-  elif [[ ! -f "$mp/NixOS-"*.iso ]] && [[ ! -f "$mp/nixos-"*.iso ]]; then
+  elif ! compgen -G "$mp/NixOS-*.iso" >/dev/null && ! compgen -G "$mp/nixos-*.iso" >/dev/null; then
     warn "NixOS ISO not found on USB or locally."
     echo "  Download: wget -O \"$mp/NixOS-24.05-minimal.iso\" \\"
     echo "    https://channels.nixos.org/nixos-24.05/latest-nixos-minimal-x86_64-linux.iso"
