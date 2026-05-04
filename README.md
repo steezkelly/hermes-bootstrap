@@ -122,10 +122,14 @@ systemctl status hermes-agent
 hermes status
 hermes tools list
 
-# Add your API key
-sudo mkdir -p /var/lib/hermes/secrets
-echo "MINIMAX_API_KEY=***" | sudo tee /var/lib/hermes/secrets/hermes.env
+# Add provider credentials without exposing them in shell history or logs
+sudo install -d -m 0700 -o hermes -g hermes /var/lib/hermes/secrets
+sudo install -m 0600 -o hermes -g hermes /dev/null /var/lib/hermes/secrets/hermes.env
+sudoedit /var/lib/hermes/secrets/hermes.env
 sudo systemctl restart hermes-agent
+
+# Example /var/lib/hermes/secrets/hermes.env content:
+# MINIMAX_API_KEY=replace-with-real-key
 ```
 
 ## What the hermes-agent Module Does
@@ -177,8 +181,9 @@ hermes-agent gateway --doctor
 # Check config
 cat /var/lib/hermes/.hermes/config.yaml
 
-# Verify environment file
-cat /var/lib/hermes/.hermes/.env
+# Verify environment file exists and has restrictive permissions
+sudo ls -l /var/lib/hermes/secrets/hermes.env
+sudo systemctl show hermes-agent -p EnvironmentFiles
 ```
 
 ### NixOS won't rebuild
@@ -252,14 +257,15 @@ HARDWARE
 |------|---------|
 | `/etc/nixos/flake.nix` | System definition |
 | `/etc/nixos/hermes-agent/` | hermes-agent source |
-| `/var/lib/hermes/.hermes/config.yaml` | Runtime config |
+| `/var/lib/hermes/secrets/hermes.env` | Runtime credentials, mode 0600, not committed |
 | `/var/lib/hermes/.hermes/logs/` | Logs |
 | `/var/lib/hermes/wiki/` | Wiki git repo |
 | `/var/lib/hermes/skills/` | Skills git repo |
+| `docs/hardening-runbook.md` | Threat model, backup, rollback, and live verification checks |
 
 ## Build Verification Checklist
 
-- [ ] `nix flake show /path/to/hermes-bootstrap/system/nixos` — parses without error
+- [ ] `nix flake metadata /path/to/hermes-bootstrap/system/nixos` — parses and resolves inputs without error
 - [ ] `sudo nixos-rebuild build --flake /path/to/hermes-bootstrap/system/nixos#hermes` — builds successfully
 - [ ] Boot test: VM starts, SSH accessible
 - [ ] hermes-agent.service starts without error
