@@ -33,17 +33,9 @@
     };
   };
 
-  swapDevices =
-    let
-      # Adjust UUID to your actual swap partition
-      swap uuid = {
-        device = "/dev/disk/by-uuid/${uuid}";
-        randomizeEncryption = true;
-      };
-    in
-    [
-      # { device = "/dev/nvme0n1p3"; }
-    ];
+  swapDevices = [
+    # { device = "/dev/nvme0n1p3"; }
+  ];
 
   # ─── Network ──────────────────────────────────────────────────────────────
   networking.useDHCP = lib.inNixShell;
@@ -52,8 +44,7 @@
   powerManagement.cpuFreqGovernor = lib.mkDefault "powersave";
 
   # ─── Hardware ─────────────────────────────────────────────────────────────
-  # CPU
-  powerManagement.cpuFreq governors = lib.mkDefault [ "powersave" "performance" ];
+  # CPU governor is set above; target deployments may override it.
 
   # GPU (uncomment and adjust for your hardware)
   # services.xserver.videoDrivers = [ "nvidia" ];

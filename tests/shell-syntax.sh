@@ -8,6 +8,9 @@ scripts=(
   "$repo_root/scripts/setup-hermes-agent.sh"
   "$repo_root/scripts/verify-bootstrap.sh"
   "$repo_root/boot-image/make-boot-image.sh"
+  "$repo_root/boot-image/overlay/auto-deploy.sh"
+  "$repo_root/boot-image/overlay/usr/local/bin/hw-detect"
+  "$repo_root/boot-image/overlay/usr/local/bin/wifi-setup"
 )
 
 for script in "${scripts[@]}"; do

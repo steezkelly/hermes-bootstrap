@@ -97,7 +97,7 @@ USB_MP=""
 for dev in /dev/sd* /dev/nvme*p; do
   [[ -b "${dev}1" ]] || continue
   mkdir -p /mnt/usb 2>/dev/null
-  mount -o ro "${dev}1" /mnt/usb 2>/dev/null && {
+  if mount -o ro "${dev}1" /mnt/usb 2>/dev/null; then
     if [[ -d /mnt/usb/hermes-bootstrap ]]; then
       USB_MP="/mnt/usb"
       log "Found hermes-bootstrap on ${dev}1"
@@ -107,7 +107,7 @@ for dev in /dev/sd* /dev/nvme*p; do
     umount /mnt/usb 2>/dev/null
   fi
   [[ -b "${dev}2" ]] || continue
-  mount -o ro "${dev}2" /mnt/usb 2>/dev/null && {
+  if mount -o ro "${dev}2" /mnt/usb 2>/dev/null; then
     if [[ -d /mnt/usb/hermes-bootstrap ]]; then
       USB_MP="/mnt/usb"
       log "Found hermes-bootstrap on ${dev}2"
@@ -123,7 +123,7 @@ if [[ -z "$USB_MP" ]]; then
 fi
 
 # Verify NixOS ISO exists
-if [[ ! -f "$USB_MP/NixOS-"*.iso ]] && [[ ! -f "$USB_MP/nixos-"*.iso ]]; then
+if ! compgen -G "$USB_MP/NixOS-*.iso" >/dev/null && ! compgen -G "$USB_MP/nixos-*.iso" >/dev/null; then
   warn "NixOS ISO not found on USB. Looking for alternative locations..."
   ISO_PATH=$(find "$USB_MP" -maxdepth 3 -name "*.iso" 2>/dev/null | grep -i nixos | head -1 || true)
   if [[ -z "$ISO_PATH" ]]; then

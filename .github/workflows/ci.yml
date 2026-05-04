@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  shell:
+    name: Shell validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Check shell syntax
+        run: tests/shell-syntax.sh
+
+      - name: Run ShellCheck
+        run: |
+          shellcheck --severity=error \
+            scripts/*.sh \
+            boot-image/*.sh \
+            boot-image/overlay/auto-deploy.sh \
+            boot-image/overlay/usr/local/bin/hw-detect \
+            boot-image/overlay/usr/local/bin/wifi-setup
+
+  nix:
+    name: Nix flake validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            accept-flake-config = true
+
+      - name: Resolve flake metadata
+        run: nix flake metadata ./system/nixos --accept-flake-config
