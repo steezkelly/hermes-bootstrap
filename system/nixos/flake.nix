@@ -167,13 +167,13 @@
             ];
 
             # ─────────────────────────────────────────────────────────────
-            # INTERACTIVE USER (steve)
+            # INTERACTIVE ADMIN USER
             # ─────────────────────────────────────────────────────────────
-            users.users.steve = {
+            users.users."hermes-admin" = {
               isNormalUser = true;
-              description = "Steve Kelly";
+              description = "Hermes administrator";
               extraGroups = [ "hermes" "docker" "wheel" ];
-              home = "/home/steve";
+              home = "/home/hermes-admin";
               createHome = true;
               shell = pkgs.bashInteractive;
             };

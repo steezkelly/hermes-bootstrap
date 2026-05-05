@@ -278,9 +278,23 @@ prepare_usb() {
     fi
   fi
 
-  # Copy NixOS ISO if present locally
-  local iso_source="/home/steve/latest-nixos-minimal-x86_64-linux.iso"
-  if [[ -f "$iso_source" ]] && [[ ! -f "$mp/NixOS-24.05-minimal.iso" ]]; then
+  # Copy NixOS ISO if present locally. Prefer an explicit env var so this
+  # public script is not tied to one operator's home directory.
+  local iso_source="${NIXOS_ISO:-}"
+  if [[ -z "$iso_source" ]]; then
+    for candidate in \
+      "$(pwd)/latest-nixos-minimal-x86_64-linux.iso" \
+      "$(pwd)/NixOS-24.05-minimal.iso" \
+      "$HOME/latest-nixos-minimal-x86_64-linux.iso" \
+      "$HOME/Downloads/latest-nixos-minimal-x86_64-linux.iso"; do
+      if [[ -f "$candidate" ]]; then
+        iso_source="$candidate"
+        break
+      fi
+    done
+  fi
+
+  if [[ -n "$iso_source" ]] && [[ -f "$iso_source" ]] && [[ ! -f "$mp/NixOS-24.05-minimal.iso" ]]; then
     log "Copying NixOS ISO to USB (this may take several minutes)..."
     cp "$iso_source" "$mp/NixOS-24.05-minimal.iso"
   elif ! compgen -G "$mp/NixOS-*.iso" >/dev/null && ! compgen -G "$mp/nixos-*.iso" >/dev/null; then
@@ -605,7 +619,7 @@ ${BOLD}VENTOY FALLBACK (if hermes-boot.img doesn't boot):${RESET}
 
 ${BOLD}POST-INSTALL:${RESET}
   After reboot:
-    ssh steve@hermes-node.local
+    ssh hermes-admin@hermes-node.local
     systemctl status hermes-agent
     hermes status
     # Add API key:
