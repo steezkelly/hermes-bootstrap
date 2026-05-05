@@ -10,7 +10,7 @@ This document records the public-readiness audit that informed the README and co
 - `system/nixos/flake.nix` created a personal admin user with a personal description and home path.
 - `scripts/deploy-hermes.sh` assumed a NixOS ISO at one operator-specific home path.
 - post-install SSH examples used a personal username.
-- GitHub repository has no explicit license yet.
+- License: Apache-2.0 (`LICENSE`).
 
 ## Current public posture
 
@@ -22,7 +22,6 @@ This document records the public-readiness audit that informed the README and co
 
 ## Follow-up recommendations
 
-- Choose and add an explicit license.
 - Parameterize deployment defaults instead of hardcoding hostname, provider, model, admin username, and gateway host.
 - Add a VM smoke test for `nixosConfigurations.hermes`.
 - Split historical deployment notes from the user-facing quickstart.
