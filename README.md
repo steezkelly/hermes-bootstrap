@@ -19,7 +19,7 @@ Public prototype / operator toolkit.
 
 The repo has been used as a real deployment workbench, so some scripts are still opinionated. The public goal is to make those opinions explicit, safe, and configurable rather than hidden in local state.
 
-Current defaults:
+Current defaults are centralized in `system/nixos/deployment-options.nix`:
 
 | Area | Default |
 |---|---|
@@ -31,6 +31,8 @@ Current defaults:
 | Hostname | `hermes-node` |
 | Gateway bind address | `127.0.0.1` |
 | Provider example | MiniMax via `/var/lib/hermes/secrets/hermes.env` |
+
+Edit `system/nixos/deployment-options.nix` before deployment to change host identity, admin account, provider/model defaults, gateway binding, locale, or the secrets env-file path.
 
 ## Architecture
 
@@ -93,6 +95,7 @@ hermes-bootstrap/
 │   ├── setup-hermes-agent.sh
 │   └── verify-bootstrap.sh
 ├── system/nixos/
+│   ├── deployment-options.nix
 │   ├── flake.nix
 │   ├── hardware-configuration.nix
 │   └── README.md

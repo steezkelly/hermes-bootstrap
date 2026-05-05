@@ -361,6 +361,7 @@ if [[ ! -f /mnt/hermes-bootstrap/system/nixos/flake.nix ]]; then
 fi
 
 cp /mnt/hermes-bootstrap/system/nixos/flake.nix /mnt/etc/nixos/flake.nix
+cp /mnt/hermes-bootstrap/system/nixos/deployment-options.nix /mnt/etc/nixos/deployment-options.nix
 cat > /mnt/etc/nixos/configuration.nix << 'CONFIG'
 # Hermes Bootstrap uses the flake in this directory:
 #   nixos-rebuild switch --flake /etc/nixos#hermes
