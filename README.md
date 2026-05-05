@@ -95,6 +95,7 @@ hermes-bootstrap/
 │   ├── setup-hermes-agent.sh
 │   └── verify-bootstrap.sh
 ├── system/nixos/
+│   ├── agent-extra-packages.nix
 │   ├── deployment-options.nix
 │   ├── flake.nix
 │   ├── hardware-configuration.nix
@@ -129,10 +130,12 @@ Never rely on remembered device names.
 git clone https://github.com/steezkelly/hermes-bootstrap.git
 cd hermes-bootstrap
 
-# Optional but recommended: validate scripts and flake metadata.
+# Optional but recommended: validate scripts and flake/module evaluation.
 tests/shell-syntax.sh
 shellcheck --severity=error scripts/*.sh boot-image/*.sh boot-image/overlay/auto-deploy.sh boot-image/overlay/usr/local/bin/hw-detect boot-image/overlay/usr/local/bin/wifi-setup
 nix flake metadata ./system/nixos --accept-flake-config
+nix eval ./system/nixos#nixosConfigurations.hermes.config.networking.hostName --accept-flake-config
+nix eval --expr 'let flake = builtins.getFlake (toString ./system/nixos); pkgs = import flake.inputs.nixpkgs { system = "x86_64-linux"; }; in builtins.length (import ./system/nixos/agent-extra-packages.nix { inherit pkgs; })' --accept-flake-config --impure
 
 # Bundle a local hermes-agent checkout if you want an offline/local-source install.
 ./scripts/setup-hermes-agent.sh --copy /path/to/hermes-agent
