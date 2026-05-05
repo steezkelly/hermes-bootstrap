@@ -10,7 +10,7 @@ This document records the public-readiness audit that informed the README and co
 - `system/nixos/flake.nix` created a personal admin user with a personal description and home path.
 - `scripts/deploy-hermes.sh` assumed a NixOS ISO at one operator-specific home path.
 - post-install SSH examples used a personal username.
-- License: Apache-2.0 (`LICENSE`).
+- License: Apache-2.0 (`LICENSE`), with canonical placeholder appendix text retained for GitHub license detection.
 
 ## Current public posture
 
@@ -22,10 +22,10 @@ This document records the public-readiness audit that informed the README and co
 - Full `system.build.toplevel.drvPath` evaluation is intentionally not in CI yet because the upstream hermes-agent flake package currently aborts on a missing `tirith` argument before this repo's system config can finish evaluating.
 - Gateway default in `deployment-options.nix` is localhost-only: `127.0.0.1`.
 - Deployment defaults are centralized in `system/nixos/deployment-options.nix` instead of being scattered through `flake.nix`.
+- Generated boot-image outputs, USB backups, and accidental root-level `auto-deploy.sh` copies are ignored; `docs/local-artifact-policy.md` documents what is ignored versus what needs human review.
 
 ## Follow-up recommendations
 
 - Add a VM smoke test for `nixosConfigurations.hermes`.
 - Split historical deployment notes from the user-facing quickstart.
 - Add successful deployment transcript or screenshots.
-- Add GitHub topics: `hermes-agent`, `nixos`, `self-hosted`, `ai-agent`, `agent-infrastructure`, `declarative-infrastructure`, `automation`.
