@@ -157,7 +157,7 @@ mkfs.ext4 -L HERMES -E lazy_itable_init "${TARGET_SSD}2"
 ```
 
 ### 4. Install from inside the target root
-Mount the target partitions, copy the flake into `/mnt/etc/nixos`, then build from inside the target root. Do **not** use `nixos-install --flake` for the flake path; it has failed in live USB contexts. The reliable path is:
+Mount the target partitions, copy the flake and `deployment-options.nix` into `/mnt/etc/nixos`, then build from inside the target root. Do **not** use `nixos-install --flake` for the flake path; it has failed in live USB contexts. The reliable path is:
 ```
 nixos-enter --root /mnt -- /bin/sh -c '
   cd /etc/nixos &&
@@ -168,7 +168,7 @@ nixos-enter --root /mnt -- /bin/sh -c '
 '
 ```
 
-The deploy scripts create `/mnt/etc/nixos/flake.nix`, seed `/mnt/var/lib/hermes/secrets/hermes.env`, and then run this command.
+The deploy scripts create `/mnt/etc/nixos/flake.nix`, copy `/mnt/etc/nixos/deployment-options.nix`, seed `/mnt/var/lib/hermes/secrets/hermes.env`, and then run this command.
 ### 5. Reboot
 ```
 umount -R /mnt

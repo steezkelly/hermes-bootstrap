@@ -501,6 +501,7 @@ HWEOF
   log "Installing flake files into /mnt/etc/nixos..."
   mkdir -p /mnt/etc/nixos
   cp /mnt/hermes-bootstrap/system/nixos/flake.nix /mnt/etc/nixos/flake.nix
+  cp /mnt/hermes-bootstrap/system/nixos/deployment-options.nix /mnt/etc/nixos/deployment-options.nix
 
   cat > /mnt/etc/nixos/configuration.nix << 'CFGEOF'
 # Hermes Bootstrap uses the flake in this directory:

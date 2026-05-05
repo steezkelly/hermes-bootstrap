@@ -11,10 +11,27 @@ This directory contains the NixOS flake used by Hermes Bootstrap.
 - `services.hermes-agent.enable = true`
 - Hermes Agent state in `/var/lib/hermes`
 - Docker-backed container mode for agent tool execution
-- provider credentials loaded from `/var/lib/hermes/secrets/hermes.env`
+- provider/model, gateway bind, admin user, hostname, locale, and secrets path loaded from `deployment-options.nix`
 - SSH enabled with root login disabled
 - Hermes gateway bound to `127.0.0.1` by default
 - an interactive admin user named `hermes-admin`
+
+## Deployment options
+
+Edit `deployment-options.nix` before deployment to change the reusable defaults without touching the main flake:
+
+```nix
+{
+  hostName = "hermes-node";
+  adminUser = "hermes-admin";
+  provider = "minimax";
+  model = "minimax/minimax-m2.7";
+  gatewayHost = "127.0.0.1";
+  gatewayPort = 8080;
+}
+```
+
+Keep `gatewayHost = "127.0.0.1"` unless you have a reviewed reverse-proxy/TLS/auth plan.
 
 ## Validate
 
@@ -40,7 +57,7 @@ sudo ./scripts/deploy-hermes.sh --partition /dev/nvme0n1
 sudo ./scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1 /path/to/hermes-bootstrap
 ```
 
-Internally, the bootstrap step copies `flake.nix` into `/mnt/etc/nixos`, seeds `/mnt/var/lib/hermes/secrets/hermes.env`, then runs:
+Internally, the bootstrap step copies `flake.nix` and `deployment-options.nix` into `/mnt/etc/nixos`, seeds `/mnt/var/lib/hermes/secrets/hermes.env`, then runs:
 
 ```bash
 sudo nixos-enter --root /mnt -- /bin/sh -c '
@@ -92,5 +109,5 @@ sudo ss -tlnp | grep -E ':22|:8080'
 ## Known limitations
 
 - Hardware configuration is still partly template-driven and should be reviewed after `nixos-generate-config`.
-- Hostname, provider/model, and admin username are currently defaults in `flake.nix`; they should become explicit deployment parameters.
+- Deployment defaults are centralized in `deployment-options.nix`; edit that file before deployment to change host/user/provider/gateway values.
 - The repo contains both manual-installer and experimental boot-image workflows. Prefer the manual path until you have reviewed the hardware notes in `SPEC.md`.

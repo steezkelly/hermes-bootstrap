@@ -18,7 +18,9 @@
 
   # ─── OUTPUTS ───────────────────────────────────────────────────────────
   outputs = inputs@{ self, nixpkgs, hermes-agent, ... }:
-
+    let
+      deployment = import ./deployment-options.nix;
+    in
     {
       # Build the hermes-agent package
       packages.x86_64-linux.default =
@@ -45,11 +47,11 @@
             services.hermes-agent = {
               enable = true;
 
-              user = "hermes";
-              group = "hermes";
+              user = deployment.agentUser;
+              group = deployment.agentGroup;
               createUser = true;
-              stateDir = "/var/lib/hermes";
-              workingDirectory = "/var/lib/hermes/workspace";
+              stateDir = deployment.stateDir;
+              workingDirectory = deployment.workspaceDir;
 
               # OCI container mode — enables agent-managed operations including
               # apt/pip/npm installs, nixos-rebuild from inside the container,
@@ -64,22 +66,23 @@
               # LLM PROVIDER
               # ─────────────────────────────────────────────────────────────
               settings = {
-                provider = "minimax";
-                model = "minimax/minimax-m2.7";
+                provider = deployment.provider;
+                model = deployment.model;
                 toolsets = [ "all" ];
                 terminal.backend = "local";
                 compression.enabled = true;
                 compression.threshold = 0.85;
-                gateway.port = 8080;
+                gateway.host = deployment.gatewayHost;
+                gateway.port = deployment.gatewayPort;
                 logging.level = "INFO";
               };
 
               # API keys via environment file (seeded from USB or set post-install)
-              environmentFiles = [ "/var/lib/hermes/secrets/hermes.env" ];
+              environmentFiles = [ deployment.secretsEnvFile ];
 
               environment = {
                 HERMES_MANAGED = "true";
-                HERMES_NODE_NAME = "hermes-os";
+                HERMES_NODE_NAME = deployment.nodeName;
               };
 
               # ─────────────────────────────────────────────────────────────
@@ -169,11 +172,11 @@
             # ─────────────────────────────────────────────────────────────
             # INTERACTIVE ADMIN USER
             # ─────────────────────────────────────────────────────────────
-            users.users."hermes-admin" = {
+            users.users.${deployment.adminUser} = {
               isNormalUser = true;
-              description = "Hermes administrator";
-              extraGroups = [ "hermes" "docker" "wheel" ];
-              home = "/home/hermes-admin";
+              description = deployment.adminDescription;
+              extraGroups = [ deployment.agentGroup "docker" "wheel" ];
+              home = "/home/${deployment.adminUser}";
               createHome = true;
               shell = pkgs.bashInteractive;
             };
@@ -181,7 +184,7 @@
             # ─────────────────────────────────────────────────────────────
             # NETWORK
             # ─────────────────────────────────────────────────────────────
-            networking.hostName = "hermes-node";
+            networking.hostName = deployment.hostName;
             networking.useDHCP = true;
 
             services.openssh = {
@@ -205,8 +208,8 @@
             # ─────────────────────────────────────────────────────────────
             # LOCALE / TIME
             # ─────────────────────────────────────────────────────────────
-            time.timeZone = "UTC";
-            i18n.defaultLocale = "en_US.UTF-8";
+            time.timeZone = deployment.timeZone;
+            i18n.defaultLocale = deployment.locale;
 
             # ─────────────────────────────────────────────────────────────
             # NIX
@@ -239,7 +242,7 @@
             # Safe for LAN-isolated host. For reverse-proxy deployment,
             # bind to 127.0.0.1 and terminate TLS at the proxy.
             # ─────────────────────────────────────────────────────────────
-            services.hermes-agent.settings.gateway.host = "127.0.0.1";
+            # Gateway host/port are configured in deployment-options.nix.
           })
         ];
       };

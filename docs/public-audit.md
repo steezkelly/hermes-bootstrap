@@ -18,11 +18,11 @@ This document records the public-readiness audit that informed the README and co
 - The tracked credential example is `data/secrets/hermes.env.template` and contains placeholders only.
 - The hardening runbook documents secret handling, destructive disk checks, backups, rollback, and live verification.
 - CI validates shell syntax, ShellCheck errors, and Nix flake metadata.
-- Gateway default in `flake.nix` is localhost-only: `127.0.0.1`.
+- Gateway default in `deployment-options.nix` is localhost-only: `127.0.0.1`.
+- Deployment defaults are centralized in `system/nixos/deployment-options.nix` instead of being scattered through `flake.nix`.
 
 ## Follow-up recommendations
 
-- Parameterize deployment defaults instead of hardcoding hostname, provider, model, admin username, and gateway host.
 - Add a VM smoke test for `nixosConfigurations.hermes`.
 - Split historical deployment notes from the user-facing quickstart.
 - Add successful deployment transcript or screenshots.
