@@ -38,7 +38,7 @@ cd /path/to/hermes-bootstrap
 sudo ./scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1 /path/to/hermes-bootstrap
 ```
 
-The script mounts the target partitions, copies the flake and `deployment-options.nix` to `/mnt/etc/nixos/`, creates a placeholder credential file if needed, and runs the known-good flake path:
+The script mounts the target partitions, preserves `nixos-generate-config` hardware output when available, copies the flake files (`flake.nix`, `deployment-options.nix`, `agent-extra-packages.nix`, and optional `flake.lock`) to `/mnt/etc/nixos/`, creates a placeholder credential file if needed, and runs the known-good flake path:
 
 ```bash
 sudo nixos-enter --root /mnt -- /bin/sh -c '

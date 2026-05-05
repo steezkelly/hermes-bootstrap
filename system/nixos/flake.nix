@@ -9,11 +9,12 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
 
-    # The real hermes-agent from NousResearch
-    hermes-agent = {
-      url = "github:NousResearch/hermes-agent";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    # The real hermes-agent from NousResearch.
+    # Keep its own nixpkgs input: the upstream package currently needs packages
+    # such as `tirith` that are present in nixos-unstable but absent from
+    # nixos-24.05. Forcing it to follow this system's stable nixpkgs makes the
+    # upstream package fail during full NixOS toplevel evaluation.
+    hermes-agent.url = "github:NousResearch/hermes-agent";
   };
 
   # ─── OUTPUTS ───────────────────────────────────────────────────────────
@@ -170,10 +171,12 @@
             };
 
             # ─────────────────────────────────────────────────────────────
-            # BOOT (Ventoy — no Grub)
+            # BOOT (x86_64 UEFI)
             # ─────────────────────────────────────────────────────────────
             boot.loader.grub.enable = lib.mkForce false;
-            boot.loader.generic-extlinux-compatible.enable = true;
+            boot.loader.systemd-boot.enable = true;
+            boot.loader.efi.canTouchEfiVariables = true;
+            boot.loader.efi.efiSysMountPoint = "/boot/efi";
             boot.initrd.availableKernelModules = [
               "ahci" "xhci_pci" "usb_storage" "nvme"
               "ext4" "vfat" "sr_mod" "sd_mod"
@@ -188,6 +191,7 @@
             # ─────────────────────────────────────────────────────────────
             # NIX
             # ─────────────────────────────────────────────────────────────
+            system.stateVersion = "24.05";
             nix.settings.experimental-features = [ "nix-command" "flakes" ];
             nix.settings.accept-flake-config = true;
             nix.gc.automatic = true;

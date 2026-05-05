@@ -57,7 +57,7 @@ sudo ./scripts/deploy-hermes.sh --partition /dev/nvme0n1
 sudo ./scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1 /path/to/hermes-bootstrap
 ```
 
-Internally, the bootstrap step copies `flake.nix` and `deployment-options.nix` into `/mnt/etc/nixos`, seeds `/mnt/var/lib/hermes/secrets/hermes.env`, then runs:
+Internally, the bootstrap step copies `flake.nix`, `deployment-options.nix`, `agent-extra-packages.nix`, and optional `flake.lock` into `/mnt/etc/nixos`, preserves generated hardware configuration when available, seeds `/mnt/var/lib/hermes/secrets/hermes.env`, then runs:
 
 ```bash
 sudo nixos-enter --root /mnt -- /bin/sh -c '
@@ -108,6 +108,6 @@ sudo ss -tlnp | grep -E ':22|:8080'
 
 ## Known limitations
 
-- Hardware configuration is still partly template-driven and should be reviewed after `nixos-generate-config`.
+- Generated hardware configuration is preserved when available; fallback hardware configuration is intentionally minimal and should be reviewed after first boot.
 - Deployment defaults are centralized in `deployment-options.nix`; edit that file before deployment to change host/user/provider/gateway values.
 - The repo contains both manual-installer and experimental boot-image workflows. Prefer the manual path until you have reviewed the hardware notes in `SPEC.md`.
