@@ -11,6 +11,20 @@ hermes-agent-src/
 # System state (lives on the target SSD, not USB)
 var-lib-hermes/
 
+# Boot image build outputs
+boot-image/aports/
+boot-image/rootfs/
+boot-image/*.cpio.gz
+boot-image/*.img
+boot-image/*.iso
+boot-image/*.tar.gz
+
+# Local USB/recovery backups copied from removable media
+usb-backup-*/
+
+# Accidental root-level copy of boot-image/overlay/auto-deploy.sh
+/auto-deploy.sh
+
 # Build caches
 .fuse_*
 *.swp

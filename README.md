@@ -88,6 +88,7 @@ hermes-bootstrap/
 │   ├── deployment-skill.md
 │   ├── hardening-runbook.md
 │   ├── install-manual-nixos.md
+│   ├── local-artifact-policy.md
 │   └── public-audit.md
 ├── scripts/
 │   ├── backup-memories.py
@@ -229,6 +230,7 @@ CI currently runs:
 - Bash syntax checks via `tests/shell-syntax.sh`
 - ShellCheck with `--severity=error`
 - `nix flake metadata ./system/nixos --accept-flake-config`
+- targeted NixOS module/config evaluation for deployment defaults and package references
 
 Local equivalent:
 
@@ -236,6 +238,8 @@ Local equivalent:
 tests/shell-syntax.sh
 shellcheck --severity=error scripts/*.sh boot-image/*.sh boot-image/overlay/auto-deploy.sh boot-image/overlay/usr/local/bin/hw-detect boot-image/overlay/usr/local/bin/wifi-setup
 nix flake metadata ./system/nixos --accept-flake-config
+nix eval ./system/nixos#nixosConfigurations.hermes.config.networking.hostName --accept-flake-config
+nix eval --expr 'let flake = builtins.getFlake (toString ./system/nixos); pkgs = import flake.inputs.nixpkgs { system = "x86_64-linux"; }; in builtins.length (import ./system/nixos/agent-extra-packages.nix { inherit pkgs; })' --accept-flake-config --impure
 ```
 
 ## Hardening and rollback
@@ -253,10 +257,9 @@ Read `docs/hardening-runbook.md` before deploying to real hardware. It covers:
 
 Near-term cleanup that would make this easier for others to reuse:
 
-- parameterize hostname, admin username, provider, model, and gateway binding
 - add a VM-based smoke test for the NixOS configuration
 - replace historical hardware-specific notes with a cleaner compatibility matrix
-- document a fully manual install path and a fully automated path separately
+- document a fully automated boot-image path separately from the manual installer path
 - add screenshots or terminal transcripts of a successful install
 
 ## License
