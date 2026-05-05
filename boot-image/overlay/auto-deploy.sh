@@ -3,7 +3,7 @@
 # hermes-bootstrap auto-deploy.sh
 # ═══════════════════════════════════════════════════════════════════════════
 # Runs inside the Alpine boot environment (hermes-boot.img).
-# Orchestrates: network → partition → nixos-install → reboot.
+# Orchestrates: network → partition → nixos-enter/nixos-rebuild → reboot.
 #
 # No arguments required in normal use.
 # For debugging, accepts:
@@ -289,14 +289,11 @@ mount -o ro,loop "$ISO_PATH" "$NIXOS_MP" 2>/dev/null || {
 
 log "NixOS ISO mounted at $NIXOS_MP"
 
-# Verify we can access nixos-install
-if [[ ! -x "$NIXOS_MP/nixos-enter" ]] && [[ ! -x "$NIXOS_MP/bin/nixos-enter" ]]; then
-  # The minimal ISO doesn't have nixos-enter; it's in the full installer
-  # Look for the installer binary
-  NIXOS_BIN=$(find "$NIXOS_MP" -name 'nixos-install' -o -name 'nixos-enter' 2>/dev/null | head -1 || true)
-  if [[ -z "$NIXOS_BIN" ]]; then
-    warn "Standard NixOS minimal ISO detected — this should work with the installer's bash environment."
-  fi
+# Verify that the installer environment can provide nixos-enter. The actual
+# command may be in PATH once the NixOS installer environment is active; this
+# check is informational because ISO layouts vary.
+if ! command -v nixos-enter &>/dev/null && [[ ! -x "$NIXOS_MP/nixos-enter" ]] && [[ ! -x "$NIXOS_MP/bin/nixos-enter" ]]; then
+  warn "nixos-enter not visible yet. Boot the standard NixOS installer if the automated image cannot provide it."
 fi
 
 # ─── STEP 7: Mount Target Partitions ────────────────────────────────
@@ -353,105 +350,25 @@ cat > /mnt/etc/nixos/hardware-configuration.nix << 'HARDWARE'
 }
 HARDWARE
 
-# ─── STEP 9: Write NixOS Configuration ────────────────────────────────
+# ─── STEP 9: Write NixOS flake into target ─────────────────────────────
 log "${BOLD}=== Writing NixOS Configuration ===${RESET}"
 
-# Copy the hermes-bootstrap flake reference
-if [[ -d "$USB_MP/hermes-bootstrap/system/nixos" ]]; then
-  cp -r "$USB_MP/hermes-bootstrap/system/nixos" /mnt/etc/nixos/hermes-bootstrap 2>/dev/null || true
-  cp "$USB_MP/hermes-bootstrap/system/nixos/flake.nix" /mnt/etc/nixos/flake.nix 2>/dev/null || true
-fi
-
-# Write the configuration.nix that imports the flake
-cat > /mnt/etc/nixos/configuration.nix << 'CONFIG'
-# Hermes OS — NixOS Configuration
-# Built by hermes-bootstrap v2
-{ config, pkgs, ... }:
-
-{
-  imports = [
-    ./hardware-configuration.nix
-    ./hermes-bootstrap/system/nixos/flake.nix
-  ];
-
-  # Bootstrap-specific overrides — these are safe defaults
-  # that nixos-install needs before the real flake is fully evaluated
-  services.hermes-agent.enable = lib.mkDefault true;
-
-  # Ensure the NixOS installer doesn't try to fetch substitutes
-  # (we're offline or semi-offline during bootstrap)
-  nix.settings.substituters = lib.mkAfter [ ];
-}
-CONFIG
-
-# ─── STEP 10: Run nixos-install ───────────────────────────────────────
-log "${BOLD}=== Installing NixOS ===${RESET}"
-echo ""
-
-# Copy hermes-bootstrap to /mnt for post-install
+# Copy hermes-bootstrap to /mnt for install and post-install reference.
 cp -r "$USB_MP/hermes-bootstrap" /mnt/ 2>/dev/null || true
 
-# ── Option A: nixos-install with --flake ───────────────────────────────
-# The standard way: use the flake on the mounted USB
-NIXOS_FLAKE="/mnt/hermes-bootstrap/system/nixos#hermes"
-
-if [[ -d /mnt/hermes-bootstrap/system/nixos/hermes-agent-src ]]; then
-  log "hermes-agent source found — using flake install"
-  debug_shell
-
-  # Try the standard nixos-install
-  if command -v nixos-install &>/dev/null; then
-    nixos-install \
-      --no-root-password \
-      --flake "$NIXOS_FLAKE" \
-      --substituters "" \
-      2>&1 | tee /tmp/nixos-install.log
-    INSTALL_EXIT=$?
-  else
-    warn "nixos-install not in PATH — using nixos-enter from ISO"
-    INSTALL_EXIT=1
-  fi
-else
-  warn "hermes-agent-src not found on USB — installing base NixOS only"
-  INSTALL_EXIT=1
+if [[ ! -f /mnt/hermes-bootstrap/system/nixos/flake.nix ]]; then
+  error "Missing /mnt/hermes-bootstrap/system/nixos/flake.nix"
 fi
 
-if [[ $INSTALL_EXIT -ne 0 ]]; then
-  echo ""
-  if [[ -f /tmp/nixos-install.log ]]; then
-    warn "nixos-install failed. Last 30 lines of log:"
-    tail -30 /tmp/nixos-install.log
-  fi
-  echo ""
-  warn "Attempting fallback install (manual configuration)..."
-  debug_shell
+cp /mnt/hermes-bootstrap/system/nixos/flake.nix /mnt/etc/nixos/flake.nix
+cat > /mnt/etc/nixos/configuration.nix << 'CONFIG'
+# Hermes Bootstrap uses the flake in this directory:
+#   nixos-rebuild switch --flake /etc/nixos#hermes
+# This file is kept as a pointer for operators and non-flake tools.
+{ ... }: { }
+CONFIG
 
-  # Fallback: minimal install without the flake
-  # Just ensure basic packages are installed
-  cat > /mnt/etc/nixos/configuration.nix << 'FALLBACK'
-{ config, lib, pkgs, ... }:
-{
-  imports = [ ./hardware-configuration.nix ];
-  boot.loader.grub.enable = lib.mkForce false;
-  boot.loader.generic-extlinux-compatible.enable = true;
-  fileSystems."/".device = "/dev/disk/by-label/HERMES";
-  fileSystems."/boot/efi".device = "/dev/disk/by-label/EFI";
-  networking.hostName = "hermes-node";
-  networking.useDHCP = true;
-  services.openssh.enable = true;
-  environment.etc."nixos/.source".source = /etc/nixos;
-}
-FALLBACK
-
-  if command -v nixos-install &>/dev/null; then
-    nixos-install --no-root-password --substituters "" 2>&1 | tail -20 || true
-  fi
-fi
-
-# ─── STEP 11: Post-Install ─────────────────────────────────────────────
-log "${BOLD}=== Post-Install Setup ===${RESET}"
-
-# Seed secrets
+# Seed secrets before rebuild because hermes-agent reads environmentFiles.
 mkdir -p /mnt/var/lib/hermes/secrets
 chmod 0750 /mnt/var/lib/hermes/secrets
 
@@ -462,11 +379,32 @@ if [[ -f "$USB_MP/hermes-bootstrap/data/secrets/hermes.env" ]]; then
 else
   cat > /mnt/var/lib/hermes/secrets/hermes.env << 'SECRETS'
 # Secrets — fill in before first boot
-# MINIMAX_API_KEY=
+# MINIMAX_API_KEY=replace-with-real-key
 SECRETS
   chmod 0640 /mnt/var/lib/hermes/secrets/hermes.env
   warn "No hermes.env on USB — created placeholder"
 fi
+
+# ─── STEP 10: Install via nixos-enter + nixos-rebuild ──────────────────
+log "${BOLD}=== Installing NixOS ===${RESET}"
+echo ""
+
+if ! command -v nixos-enter &>/dev/null; then
+  error "nixos-enter not found. Boot the standard NixOS installer and run scripts/deploy-hermes.sh --bootstrap instead."
+fi
+
+# Do not use `nixos-install --flake` here. Flake installs from live USB have
+# proven unreliable; building from inside the target root is the known-good path.
+nixos-enter --root /mnt -- /bin/sh -c '
+  cd /etc/nixos &&
+  nixos-rebuild switch \
+    --flake .#hermes \
+    --option sandbox false \
+    --option accept-flake-config true
+'
+
+# ─── STEP 11: Post-Install ─────────────────────────────────────────────
+log "${BOLD}=== Post-Install Setup ===${RESET}"
 
 # Init git tracking
 if command -v git &>/dev/null; then

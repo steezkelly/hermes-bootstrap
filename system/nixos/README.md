@@ -40,6 +40,20 @@ sudo ./scripts/deploy-hermes.sh --partition /dev/nvme0n1
 sudo ./scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1 /path/to/hermes-bootstrap
 ```
 
+Internally, the bootstrap step copies `flake.nix` into `/mnt/etc/nixos`, seeds `/mnt/var/lib/hermes/secrets/hermes.env`, then runs:
+
+```bash
+sudo nixos-enter --root /mnt -- /bin/sh -c '
+  cd /etc/nixos &&
+  nixos-rebuild switch \
+    --flake .#hermes \
+    --option sandbox false \
+    --option accept-flake-config true
+'
+```
+
+Avoid `nixos-install --flake` for this flake-based live-USB flow; it has failed in installer environments where `nixos-enter + nixos-rebuild` succeeds.
+
 The `--partition` step destroys the target disk after confirmation. Re-check device names with `lsblk` immediately before running it.
 
 ## Credentials
