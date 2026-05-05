@@ -141,33 +141,7 @@
             # ─────────────────────────────────────────────────────────────
             # EXTRA PACKAGES available to the agent and interactive shell
             # ─────────────────────────────────────────────────────────────
-            services.hermes-agent.extraPackages = [
-              # Build
-              pkgs.gcc pkgs.make pkgs.cmake pkgs.pkg-config
-              # Python
-              pkgs.python3 pkgs.python3Packages.pip pkgs.python3Packages.virtualenv
-              # Node
-              pkgs.nodejs pkgs.npm
-              # Data processing
-              pkgs.jq pkgs.yq pkgs.ripgrep pkgs.fd pkgs.fzf
-              # Core utils
-              pkgs.coreutils pkgs.findutils pkgs.gawk pkgs.sed pkgs.tar
-              pkgs.gzip pkgs.xz pkgs.zip pkgs.unzip pkgs.p7zip
-              # Network
-              pkgs.openssh pkgs.curl pkgs.wget pkgs.rsync
-              # Monitoring
-              pkgs.htop pkgs.iotop pkgs.strace pkgs.lsof
-              # VCS
-              pkgs.git pkgs.git-lfs
-              # Containers
-              pkgs.docker pkgs.docker-compose
-              # Media tools
-              pkgs.ffmpeg pkgs.imagemagick
-              # Security
-              pkgs.pass pkgs.gnupg
-              # Cloud sync
-              pkgs.rclone
-            ];
+            services.hermes-agent.extraPackages = import ./agent-extra-packages.nix { inherit pkgs; };
 
             # ─────────────────────────────────────────────────────────────
             # INTERACTIVE ADMIN USER
@@ -185,7 +159,7 @@
             # NETWORK
             # ─────────────────────────────────────────────────────────────
             networking.hostName = deployment.hostName;
-            networking.useDHCP = true;
+            networking.useDHCP = lib.mkDefault true;
 
             services.openssh = {
               enable = true;

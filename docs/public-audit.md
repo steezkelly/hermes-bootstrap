@@ -17,7 +17,9 @@ This document records the public-readiness audit that informed the README and co
 - Real credential files are ignored: `data/secrets/hermes.env` is in `.gitignore`.
 - The tracked credential example is `data/secrets/hermes.env.template` and contains placeholders only.
 - The hardening runbook documents secret handling, destructive disk checks, backups, rollback, and live verification.
-- CI validates shell syntax, ShellCheck errors, and Nix flake metadata.
+- CI validates shell syntax, ShellCheck errors, Nix flake metadata, and targeted NixOS module evaluation.
+- Targeted NixOS module evaluation caught and fixed latent config issues: a `networking.useDHCP` conflict with generated hardware configuration, invalid `pkgs.make`, invalid standalone `pkgs.npm`, and invalid GNU utility package references.
+- Full `system.build.toplevel.drvPath` evaluation is intentionally not in CI yet because the upstream hermes-agent flake package currently aborts on a missing `tirith` argument before this repo's system config can finish evaluating.
 - Gateway default in `deployment-options.nix` is localhost-only: `127.0.0.1`.
 - Deployment defaults are centralized in `system/nixos/deployment-options.nix` instead of being scattered through `flake.nix`.
 

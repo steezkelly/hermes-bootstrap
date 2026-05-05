@@ -48,3 +48,15 @@ jobs:
 
       - name: Resolve flake metadata
         run: nix flake metadata ./system/nixos --accept-flake-config
+
+      - name: Evaluate NixOS module configuration
+        run: |
+          nix eval ./system/nixos#nixosConfigurations.hermes.config.networking.hostName --accept-flake-config
+          nix eval ./system/nixos#nixosConfigurations.hermes.config.networking.useDHCP --accept-flake-config
+          nix eval ./system/nixos#nixosConfigurations.hermes.config.users.users.hermes-admin.isNormalUser --accept-flake-config
+          nix eval --expr '
+            let
+              flake = builtins.getFlake (toString ./system/nixos);
+              pkgs = import flake.inputs.nixpkgs { system = "x86_64-linux"; };
+            in builtins.length (import ./system/nixos/agent-extra-packages.nix { inherit pkgs; })
+          ' --accept-flake-config --impure
