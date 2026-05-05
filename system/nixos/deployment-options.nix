@@ -25,6 +25,9 @@
   containerMode = false;
   containerBackend = "docker";
   containerImage = "ubuntu:24.04";
+  # Runtime directory checked on first boot when containerMode = true. Place
+  # docker/podman image archives here during bootstrap to avoid registry pulls.
+  containerImageArchiveDir = "/var/lib/hermes/container-images";
 
   # LLM defaults. Credentials live in secretsEnvFile, not in this file.
   provider = "minimax";

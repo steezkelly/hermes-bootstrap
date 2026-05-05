@@ -230,6 +230,62 @@ wifi_setup() {
   fi
 }
 
+nix_option_string() {
+  local file="$1"
+  local key="$2"
+  sed -nE "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*\"([^\"]*)\";[[:space:]]*$/\1/p" "$file" | head -1
+}
+
+nix_option_bool_true() {
+  local file="$1"
+  local key="$2"
+  grep -Eq "^[[:space:]]*${key}[[:space:]]*=[[:space:]]*true;" "$file"
+}
+
+container_mode_preflight() {
+  local options_file="$1"
+  local target_root="$2"
+  local bootstrap_src="$3"
+
+  [[ -f "$options_file" ]] || error "deployment options not found: $options_file"
+
+  if ! nix_option_bool_true "$options_file" "containerMode"; then
+    log "Container mode disabled — native first boot remains network-independent from Docker/apt/uv provisioning."
+    return 0
+  fi
+
+  local backend image archive_src archive_dst archive_count=0
+  backend=$(nix_option_string "$options_file" "containerBackend")
+  image=$(nix_option_string "$options_file" "containerImage")
+  backend="${backend:-docker}"
+  image="${image:-ubuntu:24.04}"
+  archive_src="$bootstrap_src/data/container-images"
+  archive_dst=$(nix_option_string "$options_file" "containerImageArchiveDir")
+  archive_dst="${archive_dst:-/var/lib/hermes/container-images}"
+  archive_dst="$target_root/${archive_dst#/}"
+
+  warn "containerMode = true — first hermes-agent start will use upstream OCI container mode."
+  warn "Configured container backend/image: ${backend} / ${image}"
+  warn "Cold start can require: registry pull, Ubuntu apt, NodeSource, Astral uv, and uv Python downloads."
+
+  mkdir -p "$archive_dst"
+  if [[ -d "$archive_src" ]]; then
+    while IFS= read -r archive; do
+      cp "$archive" "$archive_dst/"
+      archive_count=$((archive_count + 1))
+    done < <(find "$archive_src" -maxdepth 1 -type f \( -name '*.tar' -o -name '*.tar.gz' -o -name '*.oci' \) | sort)
+  fi
+
+  if (( archive_count > 0 )); then
+    local display_archive_dst="/${archive_dst#"$target_root"/}"
+    log "Staged $archive_count container image archive(s) for first-boot preload at ${display_archive_dst}."
+    warn "Image preload only avoids registry pulls. Use a pre-provisioned image tagged as ${image} to also avoid apt/NodeSource/Astral/uv downloads."
+  else
+    warn "No container image archives found in $archive_src."
+    warn "To prewarm, place docker/podman image archives there before bootstrap, e.g.: docker save ${image} -o data/container-images/hermes-agent-base.tar"
+  fi
+}
+
 # ═══════════════════════════════════════════════════════════════════════════
 # STEP 1: Prepare USB stick
 # ═══════════════════════════════════════════════════════════════════════════
@@ -530,6 +586,11 @@ HWEOF
     cp /mnt/hermes-bootstrap/system/nixos/flake.lock /mnt/etc/nixos/flake.lock
   fi
 
+  container_mode_preflight \
+    /mnt/etc/nixos/deployment-options.nix \
+    /mnt \
+    /mnt/hermes-bootstrap
+
   cat > /mnt/etc/nixos/configuration.nix << 'CFGEOF'
 # Hermes Bootstrap uses the flake in this directory:
 #   nixos-rebuild switch --flake /etc/nixos#hermes
@@ -677,7 +738,13 @@ main() {
       --partition)
         cmd="partition_internal"; arg1="$2"; shift 2 ;;
       --bootstrap)
-        cmd="bootstrap_nixos"; arg1="$2"; arg2="${3:-}"; shift 3 ;;
+        [[ $# -ge 2 ]] || error "--bootstrap requires SSD device"
+        cmd="bootstrap_nixos"; arg1="${2:-}";
+        if [[ $# -ge 3 && "${3:-}" != --* ]]; then
+          arg2="$3"; shift 3
+        else
+          arg2=""; shift 2
+        fi ;;
       --all)
         cmd="all"; arg1="$2"; arg2="$3"; shift 3 ;;
       --verify)

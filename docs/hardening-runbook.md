@@ -97,6 +97,16 @@ The default installed runtime is native first boot (`containerMode = false`). Th
 
 If `containerMode = true`, preflight the network/cache path before rebooting into the installed system. The upstream container mode can need access to Docker registry endpoints for `ubuntu:24.04`, Ubuntu apt repositories, NodeSource, `https://astral.sh/uv/install.sh`, and uv's Python download source.
 
+Optional preload path for explicit container mode:
+
+```bash
+mkdir -p data/container-images
+docker save ubuntu:24.04 -o data/container-images/ubuntu-24.04.tar
+sudo ./scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1 /path/to/hermes-bootstrap
+```
+
+The bootstrap script stages archives into `/var/lib/hermes/container-images/`; `hermes-container-image-preload.service` loads them before `hermes-agent.service`. A base `ubuntu:24.04` archive avoids only the registry pull. Use a pre-provisioned image tagged to match `containerImage` if you also need to avoid apt/NodeSource/Astral/uv downloads.
+
 See `docs/first-boot-network.md` for the full trace.
 
 ## Rollback plan
