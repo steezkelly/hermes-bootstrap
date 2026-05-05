@@ -23,6 +23,9 @@ jobs:
       - name: Check shell syntax
         run: tests/shell-syntax.sh
 
+      - name: Check deployment readiness invariants
+        run: tests/deployment-readiness.sh
+
       - name: Run ShellCheck
         run: |
           shellcheck --severity=error \
@@ -60,3 +63,9 @@ jobs:
               pkgs = import flake.inputs.nixpkgs { system = "x86_64-linux"; };
             in builtins.length (import ./system/nixos/agent-extra-packages.nix { inherit pkgs; })
           ' --accept-flake-config --impure
+
+      - name: Evaluate full NixOS toplevel derivation
+        run: |
+          nix eval \
+            ./system/nixos#nixosConfigurations.hermes.config.system.build.toplevel.drvPath \
+            --accept-flake-config
