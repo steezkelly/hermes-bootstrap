@@ -1,6 +1,11 @@
 # Secrets (seed from USB)
 data/secrets/hermes.env
 
+# Optional local container image preloads (large artifacts, not source)
+data/container-images/*.tar
+data/container-images/*.tar.gz
+data/container-images/*.oci
+
 # Nix build artifacts
 result
 result-*

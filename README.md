@@ -188,7 +188,7 @@ This path is more hardware-sensitive. See `SPEC.md` and `docs/deployment-skill.m
 
 ### First-boot runtime mode
 
-The installed service defaults to native first boot (`containerMode = false` in `system/nixos/deployment-options.nix`). This avoids a post-install dependency on Docker Hub, Ubuntu apt, NodeSource, Astral uv, and `uv python install` before `hermes-agent.service` can start. Enable container mode only after provisioning network/cache for the upstream writable OCI tool layer. See `docs/first-boot-network.md`.
+The installed service defaults to native first boot (`containerMode = false` in `system/nixos/deployment-options.nix`). This avoids a post-install dependency on Docker Hub, Ubuntu apt, NodeSource, Astral uv, and `uv python install` before `hermes-agent.service` can start. Enable container mode only after provisioning network/cache for the upstream writable OCI tool layer. Optional image archives placed in `data/container-images/` are staged and loaded before `hermes-agent.service` on explicit container-mode systems. See `docs/first-boot-network.md`.
 
 ## Credentials
 

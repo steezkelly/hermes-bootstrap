@@ -27,6 +27,7 @@ Edit `deployment-options.nix` before deployment to change the reusable defaults 
   provider = "minimax";
   model = "minimax/minimax-m2.7";
   containerMode = false;
+  containerImageArchiveDir = "/var/lib/hermes/container-images";
   gatewayHost = "127.0.0.1";
   gatewayPort = 8080;
 }
@@ -34,7 +35,7 @@ Edit `deployment-options.nix` before deployment to change the reusable defaults 
 
 Keep `gatewayHost = "127.0.0.1"` unless you have a reviewed reverse-proxy/TLS/auth plan.
 
-Keep `containerMode = false` for network-independent first boot. Setting it to `true` enables upstream Docker-backed container mode, but first service start can need Docker image pulls plus in-container apt, NodeSource, Astral uv, and uv Python downloads. See `../../docs/first-boot-network.md`.
+Keep `containerMode = false` for network-independent first boot. Setting it to `true` enables upstream Docker-backed container mode, but first service start can need Docker image pulls plus in-container apt, NodeSource, Astral uv, and uv Python downloads. Optional archives in `data/container-images/` are staged to `containerImageArchiveDir` and loaded by `hermes-container-image-preload.service` before `hermes-agent.service`; a base image preload avoids only the registry pull unless the image is already pre-provisioned. See `../../docs/first-boot-network.md`.
 
 ## Validate
 

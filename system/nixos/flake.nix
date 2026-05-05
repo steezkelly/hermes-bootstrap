@@ -217,6 +217,63 @@
             # ─────────────────────────────────────────────────────────────
             virtualisation.docker.enable = true;
 
+            systemd.services.hermes-container-image-preload = lib.mkIf deployment.containerMode {
+              description = "Preload Hermes Agent container images before service start";
+              before = [ "hermes-agent.service" ];
+              after = [ "local-fs.target" ]
+                ++ lib.optional (deployment.containerBackend == "docker") "docker.service"
+                ++ lib.optional (deployment.containerBackend == "podman") "podman.service";
+              requires = lib.optional (deployment.containerBackend == "docker") "docker.service"
+                ++ lib.optional (deployment.containerBackend == "podman") "podman.service";
+              wantedBy = [ "multi-user.target" ];
+              serviceConfig = {
+                Type = "oneshot";
+                RemainAfterExit = true;
+                ExecStart = let
+                  preloadScript = pkgs.writeShellScript "hermes-container-image-preload" ''
+                    set -euo pipefail
+                    archive_dir=${lib.escapeShellArg deployment.containerImageArchiveDir}
+                    backend=${lib.escapeShellArg deployment.containerBackend}
+                    image=${lib.escapeShellArg deployment.containerImage}
+
+                    if [[ ! -d "$archive_dir" ]]; then
+                      echo "No Hermes container image archive directory: $archive_dir"
+                      exit 0
+                    fi
+
+                    shopt -s nullglob
+                    archives=("$archive_dir"/*.tar "$archive_dir"/*.tar.gz "$archive_dir"/*.oci)
+                    if (( ''${#archives[@]} == 0 )); then
+                      echo "No Hermes container image archives found in $archive_dir"
+                      echo "Cold containerMode=true startup may pull $image and run apt/NodeSource/Astral/uv provisioning."
+                      exit 0
+                    fi
+
+                    case "$backend" in
+                      docker)
+                        command -v docker >/dev/null || { echo "docker command missing" >&2; exit 1; }
+                        for archive in "''${archives[@]}"; do
+                          echo "Loading Hermes container image archive with docker: $archive"
+                          docker load -i "$archive"
+                        done
+                        ;;
+                      podman)
+                        command -v podman >/dev/null || { echo "podman command missing" >&2; exit 1; }
+                        for archive in "''${archives[@]}"; do
+                          echo "Loading Hermes container image archive with podman: $archive"
+                          podman load -i "$archive"
+                        done
+                        ;;
+                      *)
+                        echo "Unsupported Hermes container backend: $backend" >&2
+                        exit 1
+                        ;;
+                    esac
+                  '';
+                in "${preloadScript}";
+              };
+            };
+
             # ─────────────────────────────────────────────────────────────
             # GATEWAY SECURITY — bind to localhost only.
             # Safe for LAN-isolated host. For reverse-proxy deployment,

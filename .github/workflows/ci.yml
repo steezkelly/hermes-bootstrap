@@ -29,6 +29,12 @@ jobs:
       - name: Check boot image hardening invariants
         run: tests/boot-image-static.sh
 
+      - name: Check container mode hardening invariants
+        run: tests/container-mode-static.sh
+
+      - name: Unit test container mode preflight
+        run: tests/container-mode-preflight-unit.sh
+
       - name: Run ShellCheck
         run: |
           shellcheck --severity=error \
@@ -61,12 +67,34 @@ jobs:
           nix eval ./system/nixos#nixosConfigurations.hermes.config.networking.hostName --accept-flake-config
           nix eval ./system/nixos#nixosConfigurations.hermes.config.networking.useDHCP --accept-flake-config
           nix eval ./system/nixos#nixosConfigurations.hermes.config.users.users.hermes-admin.isNormalUser --accept-flake-config
+          nix eval ./system/nixos#nixosConfigurations.hermes.config.services.hermes-agent.container.enable --accept-flake-config
+          nix eval --expr '
+            let flake = builtins.getFlake (toString ./system/nixos);
+            in builtins.hasAttr "hermes-container-image-preload" flake.nixosConfigurations.hermes.config.systemd.services
+          ' --accept-flake-config --impure
           nix eval --expr '
             let
               flake = builtins.getFlake (toString ./system/nixos);
               pkgs = import flake.inputs.nixpkgs { system = "x86_64-linux"; };
             in builtins.length (import ./system/nixos/agent-extra-packages.nix { inherit pkgs; })
           ' --accept-flake-config --impure
+
+      - name: Evaluate explicit container-mode preload configuration
+        run: |
+          cp -a system/nixos /tmp/hermes-nixos-container-mode
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('/tmp/hermes-nixos-container-mode/deployment-options.nix')
+          s = p.read_text()
+          s = s.replace('containerMode = false;', 'containerMode = true;')
+          p.write_text(s)
+          PY
+          nix eval /tmp/hermes-nixos-container-mode#nixosConfigurations.hermes.config.services.hermes-agent.container.enable --accept-flake-config
+          nix eval --expr '
+            let flake = builtins.getFlake (toString /tmp/hermes-nixos-container-mode);
+            in builtins.hasAttr "hermes-container-image-preload" flake.nixosConfigurations.hermes.config.systemd.services
+          ' --accept-flake-config --impure
+          nix eval /tmp/hermes-nixos-container-mode#nixosConfigurations.hermes.config.systemd.services.hermes-container-image-preload.before --accept-flake-config
 
       - name: Evaluate full NixOS toplevel derivation
         run: |

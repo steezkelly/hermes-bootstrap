@@ -73,6 +73,25 @@ Do that only after confirming one of:
 - `containerImage` points at a preloaded local image/tag
 - a registry/apt/NodeSource/Astral/uv mirror strategy is in place
 
+## Optional image preload for explicit container mode
+
+If you intentionally set `containerMode = true`, you can stage local image archives before bootstrap:
+
+```bash
+mkdir -p data/container-images
+docker pull ubuntu:24.04
+docker save ubuntu:24.04 -o data/container-images/ubuntu-24.04.tar
+sudo ./scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1 /path/to/hermes-bootstrap
+```
+
+During bootstrap, `scripts/deploy-hermes.sh` copies `data/container-images/*.tar`, `*.tar.gz`, and `*.oci` into the installed system's `containerImageArchiveDir` (default: `/var/lib/hermes/container-images`). On first boot, `hermes-container-image-preload.service` runs before `hermes-agent.service` and loads those archives with Docker or Podman according to `containerBackend`.
+
+Important limitation: preloading `ubuntu:24.04` only avoids the registry pull. The upstream container entrypoint can still run `apt-get`, NodeSource setup, Astral uv install, and `uv python install`. For a genuinely network-independent container first start, preload a pre-provisioned image that already contains those tools and tag it to match `containerImage` in `deployment-options.nix`.
+
+Do not put provider API keys or other secrets into container images. Keep secrets in `secretsEnvFile`.
+
+For the upstream option trace, viable fixes, and risks to avoid, see `docs/container-mode-prewarm.md`.
+
 ## Validation
 
 Static CI guardrail:

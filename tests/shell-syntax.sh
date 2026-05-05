@@ -14,6 +14,8 @@ scripts=(
   "$repo_root/tests/deployment-readiness.sh"
   "$repo_root/tests/boot-image-smoke.sh"
   "$repo_root/tests/boot-image-static.sh"
+  "$repo_root/tests/container-mode-static.sh"
+  "$repo_root/tests/container-mode-preflight-unit.sh"
 )
 
 for script in "${scripts[@]}"; do
