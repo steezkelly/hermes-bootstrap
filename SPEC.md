@@ -45,7 +45,7 @@ TARGET MACHINE (Minipc, bare metal)
 │   ├── bring up network → WiFi guided setup (or ethernet DHCP)
 │   ├── partition SSD    → EFI + root on target
 │   ├── mount USB data   → hermes-bootstrap/ + NixOS ISO
-│   ├── run nixos-install → NixOS on internal SSD
+│   ├── install system   → nixos-enter + nixos-rebuild from target root
 │   └── reboot
 │
 └── Step 5: NixOS on internal SSD
@@ -156,15 +156,19 @@ mkfs.fat -F 32 -n EFI "${TARGET_SSD}1"
 mkfs.ext4 -L HERMES -E lazy_itable_init "${TARGET_SSD}2"
 ```
 
-### 4. Run NixOS Installer
-Mount the USB's NixOS ISO via loopback, then:
+### 4. Install from inside the target root
+Mount the target partitions, copy the flake into `/mnt/etc/nixos`, then build from inside the target root. Do **not** use `nixos-install --flake` for the flake path; it has failed in live USB contexts. The reliable path is:
 ```
-nixos-install \
-  --no-root-password \
-  --flake /mnt/hermes-bootstrap/system/nixos#hermes \
-  --substituters ""  # offline; don't try to fetch from cache
+nixos-enter --root /mnt -- /bin/sh -c '
+  cd /etc/nixos &&
+  nixos-rebuild switch \
+    --flake .#hermes \
+    --option sandbox false \
+    --option accept-flake-config true
+'
 ```
 
+The deploy scripts create `/mnt/etc/nixos/flake.nix`, seed `/mnt/var/lib/hermes/secrets/hermes.env`, and then run this command.
 ### 5. Reboot
 ```
 umount -R /mnt
@@ -200,7 +204,7 @@ Or: **single USB with two partitions** — partition 1: hermes-boot.img (bootabl
 | Location | Change |
 |---|---|
 | `prepare_usb()` | Remove Ventoy. Create FAT32. Copy files. Done. |
-| `bootstrap_nixos()` | Add WiFi config before nixos-install. Add hardware echo. |
+| `bootstrap_nixos()` | Add WiFi config, copy flake into target, run nixos-enter + nixos-rebuild from target root. |
 | New: `wifi_setup()` | Guided WiFi setup with scan + wpa_passphrase |
 | New: `usb_io_retry()` | Wrap USB mount with 3x retry + different mount options |
 | New: `hardware_detect()` | Echo lsblk, ip link, iw dev at start of each step |
@@ -215,7 +219,7 @@ Or: **single USB with two partitions** — partition 1: hermes-boot.img (bootabl
 | USB I/O error on read | `cp` or `mount` fails with EIO | Retry 3x, then try different USB port or mount -o sync |
 | WiFi not reachable | `ping -c 1 8.8.8.8` fails | Fallback to guided WiFi setup |
 | Ethernet no DHCP | `dhcpcd eth0` times out | Try WiFi |
-| nixos-install fails | non-zero exit | Show last 50 lines of log, offer shell to debug |
+| flake rebuild fails | non-zero exit from `nixos-rebuild switch` | Show command output; re-enter with `nixos-enter --root /mnt` and inspect `/etc/nixos` |
 | Wrong device selected | confirm() prompt | Must type "yes" to proceed |
 | NixOS ISO missing on USB | file not found | Error with instructions to copy it |
 | Ventoy fallback needed | user chooses alternative | ventoy.json timeout=5 workaround |

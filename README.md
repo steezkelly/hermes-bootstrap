@@ -84,7 +84,9 @@ hermes-bootstrap/
 │   └── wiki/.gitkeep
 ├── docs/
 │   ├── deployment-skill.md
-│   └── hardening-runbook.md
+│   ├── hardening-runbook.md
+│   ├── install-manual-nixos.md
+│   └── public-audit.md
 ├── scripts/
 │   ├── backup-memories.py
 │   ├── deploy-hermes.sh
@@ -142,7 +144,7 @@ There are two practical paths in this repo.
 
 ### Path A: NixOS installer USB plus deploy script
 
-This is the most understandable path for humans to audit.
+This is the most understandable path for humans to audit. The detailed walkthrough is `docs/install-manual-nixos.md`.
 
 1. Put the NixOS minimal ISO and this repository on USB media.
 2. Boot the target machine into the NixOS installer.

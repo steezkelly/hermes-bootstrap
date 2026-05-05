@@ -495,28 +495,21 @@ bootstrap_nixos() {
 }
 HWEOF
 
-  # Install hermes-agent flake
-  local hermes_src="/mnt/hermes-bootstrap/system/nixos/hermes-agent-src"
-  if [[ -d "$hermes_src" ]]; then
-    log "Placing hermes-agent at /etc/nixos/hermes-agent..."
-    mkdir -p /etc/nixos
-    cp -r "$hermes_src" /etc/nixos/hermes-agent
-  fi
+  # Install the flake into the target system. Do not use
+  # `nixos-install --flake` here: it has proven unreliable from live USB
+  # environments. Build from inside the target root with nixos-enter instead.
+  log "Installing flake files into /mnt/etc/nixos..."
+  mkdir -p /mnt/etc/nixos
+  cp /mnt/hermes-bootstrap/system/nixos/flake.nix /mnt/etc/nixos/flake.nix
 
-  # Replace configuration.nix with our flake reference
-  cat > /mnt/etc/nixos/configuration.nix << CFGEOF
-# Hermes OS configuration
-# Source: /mnt/hermes-bootstrap/system/nixos/flake.nix
-# After install, this file lives at /etc/nixos/configuration.nix
-
-(import /mnt/hermes-bootstrap/system/nixos/flake.nix).nixosConfigurations.hermes.config
+  cat > /mnt/etc/nixos/configuration.nix << 'CFGEOF'
+# Hermes Bootstrap uses the flake in this directory:
+#   nixos-rebuild switch --flake /etc/nixos#hermes
+# This file is kept as a pointer for operators and non-flake tools.
+{ ... }: { }
 CFGEOF
 
-  # Run nixos-install
-  log "Installing NixOS (this takes 10-30 minutes)..."
-  nixos-install --no-root-password --flake "/mnt/hermes-bootstrap/system/nixos#hermes"
-
-  # ── Post-install: seed secrets from USB ──────────────────────────────────
+  # ── Pre-rebuild: seed secrets because hermes-agent reads environmentFiles ──
   log "Seeding secrets..."
   mkdir -p /mnt/var/lib/hermes/secrets
   chmod 0750 /mnt/var/lib/hermes/secrets
@@ -530,7 +523,7 @@ CFGEOF
     # Create a placeholder that the agent can fill in post-boot
     cat > /mnt/var/lib/hermes/secrets/hermes.env << 'SECRETS_EOF'
 # Secrets — fill in before first boot
-# MINIMAX_API_KEY=***
+# MINIMAX_API_KEY=replace-with-real-key
 SECRETS_EOF
     chmod 0640 /mnt/var/lib/hermes/secrets/hermes.env
     warn "No hermes.env found on USB — created placeholder at /var/lib/hermes/secrets/hermes.env"
@@ -538,6 +531,16 @@ SECRETS_EOF
 
   # Wire secrets into the flake's environmentFiles
   # (The flake references /var/lib/hermes/secrets/hermes.env via environmentFiles)
+
+  # Run the reliable flake install path from inside the target root.
+  log "Installing NixOS via nixos-enter + nixos-rebuild (this takes 10-30 minutes)..."
+  nixos-enter --root /mnt -- /bin/sh -c '
+    cd /etc/nixos &&
+    nixos-rebuild switch \
+      --flake .#hermes \
+      --option sandbox false \
+      --option accept-flake-config true
+  '
 
   # ── Post-install: init git repo for state tracking ───────────────────────
   log "Initializing git state tracking..."
@@ -667,7 +670,7 @@ main() {
       partition_internal "$arg1" ;;
     bootstrap_nixos)
       [[ -n "$arg1" ]] || { usage; exit 1; }
-      bootstrap_nixos "$arg1" "$arg2" ;;
+      bootstrap_nixos "$arg1" "${arg2:-}" ;;
     all)
       [[ -n "$arg1" && -n "$arg2" ]] || { usage; exit 1; }
       prepare_usb "$arg1"

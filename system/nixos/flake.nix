@@ -128,7 +128,7 @@
                   - Dotfiles: /etc/nixos is a git repo
 
                   ## Update hermes-agent
-                  - Update source: cd /etc/nixos/hermes-agent && git pull
+                  - Update flake lock: cd /etc/nixos && sudo nix flake lock --update-input hermes-agent
                   - Rebuild: sudo nixos-rebuild switch --flake /etc/nixos
                   - Restart: systemctl restart hermes-agent
                 '';
