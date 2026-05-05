@@ -17,6 +17,15 @@
   stateDir = "/var/lib/hermes";
   workspaceDir = "/var/lib/hermes/workspace";
 
+  # First-boot runtime mode.
+  # false = native Nix-built service: no Docker Hub / apt / NodeSource / Astral
+  #         uv downloads during the first boot of the installed machine.
+  # true  = upstream OCI container mode: writable apt/npm/pip/uv tool layer, but
+  #         first service start needs the image and in-container provisioning.
+  containerMode = false;
+  containerBackend = "docker";
+  containerImage = "ubuntu:24.04";
+
   # LLM defaults. Credentials live in secretsEnvFile, not in this file.
   provider = "minimax";
   model = "minimax/minimax-m2.7";

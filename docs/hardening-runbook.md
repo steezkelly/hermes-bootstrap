@@ -78,6 +78,27 @@ git -C /var/lib/hermes/skills status --short
 git -C /var/lib/hermes/skills push
 ```
 
+## Boot image artifact validation
+
+Before writing `boot-image/hermes-boot.img` to a USB stick, rebuild and smoke-test it as a regular file:
+
+```bash
+sudo ./boot-image/make-boot-image.sh --size 256M --output boot-image/hermes-boot.img --force-rootfs
+tests/boot-image-smoke.sh boot-image/hermes-boot.img
+```
+
+The smoke test is non-destructive. It reads the FAT partition with mtools, validates MBR/GPT metadata, checks `vmlinuz`, `initramfs.gz`, `syslinux.cfg`, and verifies UEFI fallback files at `/EFI/BOOT/BOOTX64.EFI` plus `/EFI/BOOT/grub.cfg`.
+
+See `docs/boot-image-smoke-tests.md` for details and known limits.
+
+## First-boot service network dependency
+
+The default installed runtime is native first boot (`containerMode = false`). This avoids first-start Docker image pulls and in-container apt/NodeSource/Astral uv provisioning before `hermes-agent.service` can become active.
+
+If `containerMode = true`, preflight the network/cache path before rebooting into the installed system. The upstream container mode can need access to Docker registry endpoints for `ubuntu:24.04`, Ubuntu apt repositories, NodeSource, `https://astral.sh/uv/install.sh`, and uv's Python download source.
+
+See `docs/first-boot-network.md` for the full trace.
+
 ## Rollback plan
 
 For a bad NixOS rebuild:

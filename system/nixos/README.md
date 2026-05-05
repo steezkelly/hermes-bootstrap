@@ -10,8 +10,8 @@ This directory contains the NixOS flake used by Hermes Bootstrap.
 - `NousResearch/hermes-agent` as a flake input
 - `services.hermes-agent.enable = true`
 - Hermes Agent state in `/var/lib/hermes`
-- Docker-backed container mode for agent tool execution
-- provider/model, gateway bind, admin user, hostname, locale, and secrets path loaded from `deployment-options.nix`
+- Native first boot for `hermes-agent.service` by default, with optional Docker-backed container mode for agent tool execution
+- provider/model, gateway bind, admin user, hostname, locale, secrets path, and runtime mode loaded from `deployment-options.nix`
 - SSH enabled with root login disabled
 - Hermes gateway bound to `127.0.0.1` by default
 - an interactive admin user named `hermes-admin`
@@ -26,12 +26,15 @@ Edit `deployment-options.nix` before deployment to change the reusable defaults 
   adminUser = "hermes-admin";
   provider = "minimax";
   model = "minimax/minimax-m2.7";
+  containerMode = false;
   gatewayHost = "127.0.0.1";
   gatewayPort = 8080;
 }
 ```
 
 Keep `gatewayHost = "127.0.0.1"` unless you have a reviewed reverse-proxy/TLS/auth plan.
+
+Keep `containerMode = false` for network-independent first boot. Setting it to `true` enables upstream Docker-backed container mode, but first service start can need Docker image pulls plus in-container apt, NodeSource, Astral uv, and uv Python downloads. See `../../docs/first-boot-network.md`.
 
 ## Validate
 

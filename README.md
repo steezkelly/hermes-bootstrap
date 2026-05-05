@@ -177,10 +177,18 @@ sudo ./scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1 /path/to/hermes-bootstr
 
 ```bash
 cd boot-image
-sudo ./make-boot-image.sh
+sudo ./make-boot-image.sh --size 256M --output hermes-boot.img --force-rootfs
+cd ..
+tests/boot-image-smoke.sh boot-image/hermes-boot.img
 ```
 
+The smoke test is non-destructive: it reads the image with mtools, validates MBR/GPT/FAT contents, and checks `/EFI/BOOT/BOOTX64.EFI` plus `grub.cfg`. It does not write a USB device. See `docs/boot-image-smoke-tests.md`.
+
 This path is more hardware-sensitive. See `SPEC.md` and `docs/deployment-skill.md` for known USB, UEFI, Ventoy, and N100-class hardware notes.
+
+### First-boot runtime mode
+
+The installed service defaults to native first boot (`containerMode = false` in `system/nixos/deployment-options.nix`). This avoids a post-install dependency on Docker Hub, Ubuntu apt, NodeSource, Astral uv, and `uv python install` before `hermes-agent.service` can start. Enable container mode only after provisioning network/cache for the upstream writable OCI tool layer. See `docs/first-boot-network.md`.
 
 ## Credentials
 

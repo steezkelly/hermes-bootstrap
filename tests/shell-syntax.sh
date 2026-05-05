@@ -12,6 +12,8 @@ scripts=(
   "$repo_root/boot-image/overlay/usr/local/bin/hw-detect"
   "$repo_root/boot-image/overlay/usr/local/bin/wifi-setup"
   "$repo_root/tests/deployment-readiness.sh"
+  "$repo_root/tests/boot-image-smoke.sh"
+  "$repo_root/tests/boot-image-static.sh"
 )
 
 for script in "${scripts[@]}"; do
