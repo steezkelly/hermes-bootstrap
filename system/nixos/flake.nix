@@ -54,14 +54,16 @@
               stateDir = deployment.stateDir;
               workingDirectory = deployment.workspaceDir;
 
-              # OCI container mode — enables agent-managed operations including
-              # apt/pip/npm installs, nixos-rebuild from inside the container,
-              # and full self-modification. The NixOS store is bind-mounted
-              # read-only; /var/lib/hermes and /etc/nixos are bind-mounted
-              # read-write so the agent can modify its own environment.
-              container.enable = true;
-              container.backend = "docker";
-              container.image = "ubuntu:24.04";
+              # Runtime mode is deployment-controlled. Native mode is the default
+              # for first boot because it uses the Nix-built package and avoids
+              # Docker Hub, apt, NodeSource, Astral uv, and uv Python downloads
+              # during the installed system's first service start. Enable
+              # containerMode in deployment-options.nix after provisioning a
+              # network/cache path for the writable OCI tool layer.
+              container.enable = deployment.containerMode;
+              container.backend = deployment.containerBackend;
+              container.image = deployment.containerImage;
+              addToSystemPackages = true;
 
               # ─────────────────────────────────────────────────────────────
               # LLM PROVIDER

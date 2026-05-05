@@ -26,6 +26,9 @@ jobs:
       - name: Check deployment readiness invariants
         run: tests/deployment-readiness.sh
 
+      - name: Check boot image hardening invariants
+        run: tests/boot-image-static.sh
+
       - name: Run ShellCheck
         run: |
           shellcheck --severity=error \
@@ -33,7 +36,8 @@ jobs:
             boot-image/*.sh \
             boot-image/overlay/auto-deploy.sh \
             boot-image/overlay/usr/local/bin/hw-detect \
-            boot-image/overlay/usr/local/bin/wifi-setup
+            boot-image/overlay/usr/local/bin/wifi-setup \
+            tests/*.sh
 
   nix:
     name: Nix flake validation
