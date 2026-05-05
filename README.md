@@ -1,303 +1,257 @@
-# HERMES OS — Self-Owned AI Environment Bootstrap
+# Hermes Bootstrap
 
+Hermes Bootstrap is a NixOS deployment kit for running Hermes Agent on hardware you control.
+
+It turns a small server, mini PC, or spare x86_64 machine into a reproducible, self-owned AI agent node:
+
+- NixOS system definition in `system/nixos/flake.nix`
+- Hermes Agent managed by systemd
+- isolated `/var/lib/hermes` state directory for memory, logs, skills, wiki, and workspace
+- provider credentials loaded from a root-owned env file, not committed config
+- Docker-backed agent execution environment for tool use and self-maintenance
+- USB/NixOS installer workflows plus hardening and rollback notes
+
+This repository is intentionally infrastructure-focused. It does not include private memories, private wiki content, real API keys, or personal workspace data.
+
+## Status
+
+Public prototype / operator toolkit.
+
+The repo has been used as a real deployment workbench, so some scripts are still opinionated. The public goal is to make those opinions explicit, safe, and configurable rather than hidden in local state.
+
+Current defaults:
+
+| Area | Default |
+|---|---|
+| Target architecture | x86_64-linux |
+| OS | NixOS 24.05 |
+| Agent | NousResearch/hermes-agent flake input |
+| Service user | `hermes` |
+| Interactive admin user | `hermes-admin` |
+| Hostname | `hermes-node` |
+| Gateway bind address | `127.0.0.1` |
+| Provider example | MiniMax via `/var/lib/hermes/secrets/hermes.env` |
+
+## Architecture
+
+```text
+Linux build/admin machine
+  |
+  | prepares USB / copies repo / bundles hermes-agent source
+  v
+USB installer media
+  |
+  | boots target machine into NixOS installer or bootstrap environment
+  v
+Target machine internal disk
+  |
+  | NixOS + systemd + Docker + Hermes Agent
+  v
+/var/lib/hermes
+  |- .hermes/        runtime config, logs, sessions, memory
+  |- workspace/      agent working directory
+  |- secrets/        provider credentials, mode 0600, never committed
+  |- wiki/           optional private knowledge base seed
+  |- skills/         optional skill seed
+  `- backups/        local backup target
 ```
-                         ┌──────────────────────────────────────┐
-                         │          USB STICK (234GB)          │
-                         │   Bootable (Ventoy) — exFAT          │
-                         │   NixOS ISO + hermes-bootstrap/     │
-                         └──────────┬───────────────────────────┘
-                                    │ boot
-                                    ▼
-┌─────────────────────────────────────────────────────────────┐
-│                    INTERNAL SSD (512GB)                      │
-│                   NixOS 24.05 + hermes-agent                 │
-│                                                                │
-│   ┌─────────────────────────────────────────────────────┐    │
-│   │  hermes-agent.service (systemd)                      │    │
-│   │  └── hermes gateway — API + tools + skills        │    │
-│   └─────────────────────────────────────────────────────┘    │
-│                                                                │
-│   /var/lib/hermes/.hermes/  ← State, config, memory         │
-│   /var/lib/hermes/workspace/  ← Working directory            │
-│   /etc/nixos/  ← System config (git, versioned)              │
-│   /home/steve/  ← Interactive user home                      │
-│                                                                │
-└───────────────────────────────────────────────────────────────┘
-```
 
-## What Is This?
+Runtime posture:
 
-A complete deployment package for a self-owned AI agent system.
-Write to USB → boot target → install → AI agent running on your hardware.
+- SSH is enabled, root login disabled.
+- Hermes gateway binds to localhost by default.
+- Public internet exposure is out of scope unless you add a reviewed reverse proxy/TLS layer.
+- The agent has broad local power by design; use this on machines you are willing to dedicate to agent work.
 
-The system is **declarative, reproducible, and self-owned**:
-- Every system config is in `/etc/nixos/configuration.nix`
-- Every config change is a `nixos-rebuild switch` away
-- Git repos for wiki, skills, dotfiles — no magic state
+## Repository layout
 
-## Hardware
-
-| Component | Details |
-|-----------|---------|
-| USB stick | 234GB (exFAT, Ventoy bootloader + ISO) |
-| Internal SSD | 512GB (NixOS + hermes-agent) |
-| Bootloader | Ventoy (USB) → extlinux (SSD) |
-| Partitions | EFI (512MB) + root (495GB) |
-
-## Directory Structure
-
-```
+```text
 hermes-bootstrap/
-├── README.md                    ← You are here
+├── README.md
+├── SPEC.md
+├── .github/workflows/ci.yml
+├── boot-image/
+│   ├── make-boot-image.sh
+│   └── overlay/
+│       ├── auto-deploy.sh
+│       └── usr/local/bin/{hw-detect,wifi-setup}
+├── boot/ventoy/ventoy.json
+├── data/
+│   ├── memory/.gitkeep
+│   ├── secrets/hermes.env.template
+│   ├── skills/.gitkeep
+│   ├── tools/.gitkeep
+│   └── wiki/.gitkeep
+├── docs/
+│   ├── deployment-skill.md
+│   └── hardening-runbook.md
 ├── scripts/
-│   └── deploy-hermes.sh         ← The deploy script
-├── system/
-│   └── nixos/
-│       ├── flake.nix             ← NixOS flake (references hermes-agent)
-│       ├── hardware-configuration.nix  ← Template (auto-generated on target)
-│       └── README.md             ← NixOS-specific instructions
-├── data/                        ← Seed data (copied to /var/lib/hermes on first boot)
-│   ├── skills/                  ← Pre-loaded skills (git repo)
-│   ├── wiki/                    ← Pre-loaded wiki (git repo)
-│   ├── memory/                  ← Pre-loaded memory (mnemosyne)
-│   └── tools/                   ← Pre-loaded tools
-└── boot/ventoy/                 ← Ventoy config (if needed)
+│   ├── backup-memories.py
+│   ├── deploy-hermes.sh
+│   ├── setup-hermes-agent.sh
+│   └── verify-bootstrap.sh
+├── system/nixos/
+│   ├── flake.nix
+│   ├── hardware-configuration.nix
+│   └── README.md
+└── tests/shell-syntax.sh
 ```
 
-## Quick Start
+## Prerequisites
 
-### Step 1: Prepare USB (on any Linux machine)
+On the build/admin machine:
 
-The USB is pre-loaded with Ventoy. Copy the bootstrap folder and NixOS ISO onto it.
+- Linux shell environment
+- Git
+- Nix, if you want to validate the flake locally
+- ShellCheck, if you want to run shell lint locally
+- Docker, only if building the experimental Alpine boot image
+- a NixOS minimal ISO for manual installer flows
+- a target x86_64 machine whose disk can be erased
+
+Danger zone: deployment scripts can partition and format disks. Always identify devices live with:
 
 ```bash
-# Clone this repo
+lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN,FSTYPE,MOUNTPOINTS
+sudo blkid
+```
+
+Never rely on remembered device names.
+
+## Quick start: review and prepare
+
+```bash
 git clone https://github.com/steezkelly/hermes-bootstrap.git
 cd hermes-bootstrap
 
-# ⚠️ MANDATORY: Bundle hermes-agent source before deployment
-./scripts/setup-hermes-agent.sh --copy ~/.hermes/hermes-agent
+# Optional but recommended: validate scripts and flake metadata.
+tests/shell-syntax.sh
+shellcheck --severity=error scripts/*.sh boot-image/*.sh boot-image/overlay/auto-deploy.sh boot-image/overlay/usr/local/bin/hw-detect boot-image/overlay/usr/local/bin/wifi-setup
+nix flake metadata ./system/nixos --accept-flake-config
 
-# Download NixOS ISO
-wget https://channels.nixos.org/nixos-24.05/latest-nixos-minimal-x86_64-linux.iso
+# Bundle a local hermes-agent checkout if you want an offline/local-source install.
+./scripts/setup-hermes-agent.sh --copy /path/to/hermes-agent
 
-# Copy bootstrap + ISO onto the Ventoy USB
-sudo ./scripts/deploy-hermes.sh --prepare-usb /dev/sdX
+# Review hardening and rollback notes before touching hardware.
+less docs/hardening-runbook.md
 ```
 
-Ventoy scans the USB for ISO files on boot — the NixOS ISO will appear in the
-Ventoy boot menu automatically.
+## Deployment paths
 
-### Step 2: Boot Target from USB
+There are two practical paths in this repo.
 
-1. Insert USB into target machine
-2. Power on → BIOS/UEFI boot menu → select USB (boot from ISO file)
-3. NixOS minimal installer boots to TTY
+### Path A: NixOS installer USB plus deploy script
 
-### Step 3: Partition Internal SSD
+This is the most understandable path for humans to audit.
+
+1. Put the NixOS minimal ISO and this repository on USB media.
+2. Boot the target machine into the NixOS installer.
+3. Run the deploy script from the installer environment.
+
+Example commands inside the installer, after the USB is mounted and this repo is available:
 
 ```bash
-# In the NixOS installer TTY
-sudo ./hermes-bootstrap/scripts/deploy-hermes.sh --partition /dev/nvme0n1
+cd /path/to/hermes-bootstrap
+
+# Destroys the selected target disk after confirmation.
+sudo ./scripts/deploy-hermes.sh --partition /dev/nvme0n1
+
+# Installs NixOS + Hermes Agent onto the mounted target.
+sudo ./scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1 /path/to/hermes-bootstrap
 ```
 
-### Step 4: Bootstrap NixOS
+### Path B: experimental boot image
+
+`boot-image/make-boot-image.sh` builds an Alpine-based bootstrap image intended to automate more of the process.
 
 ```bash
-# Still in the NixOS installer TTY
-sudo ./hermes-bootstrap/scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1
-# This runs nixos-install — takes 10-30 minutes
+cd boot-image
+sudo ./make-boot-image.sh
 ```
 
-### Step 5: Post-Install
+This path is more hardware-sensitive. See `SPEC.md` and `docs/deployment-skill.md` for known USB, UEFI, Ventoy, and N100-class hardware notes.
+
+## Credentials
+
+Do not paste real API keys into shell commands or commit them to this repo.
+
+The target system expects credentials at:
+
+```text
+/var/lib/hermes/secrets/hermes.env
+```
+
+Create/edit it safely after install:
 
 ```bash
-# After first reboot, SSH in
-ssh hermes@hermes-node.local
-
-# Verify agent is online
-systemctl status hermes-agent
-
-# Check it works
-hermes status
-hermes tools list
-
-# Add provider credentials without exposing them in shell history or logs
 sudo install -d -m 0700 -o hermes -g hermes /var/lib/hermes/secrets
 sudo install -m 0600 -o hermes -g hermes /dev/null /var/lib/hermes/secrets/hermes.env
 sudoedit /var/lib/hermes/secrets/hermes.env
 sudo systemctl restart hermes-agent
-
-# Example /var/lib/hermes/secrets/hermes.env content:
-# MINIMAX_API_KEY=replace-with-real-key
 ```
 
-## What the hermes-agent Module Does
-
-The NixOS module (`services.hermes-agent`) from the real hermes-agent handles:
-
-| Feature | Implementation |
-|---------|----------------|
-| User/group | Created automatically (`hermes` user) |
-| State directory | `/var/lib/hermes` with proper permissions |
-| Config file | `/var/lib/hermes/.hermes/config.yaml` (generated from Nix) |
-| Documents | Seed files placed in workspace on deploy |
-| MCP servers | Declarative config → merged into settings |
-| Plugins | Symlinked from `/var/lib/hermes/.hermes/plugins/` |
-| Logs | `/var/lib/hermes/.hermes/logs/` |
-| Service | `systemd service hermes-agent` with hardening |
-| Gateway | `hermes gateway` command, port 8080 |
-
-## Self-Modification
-
-One of the key goals: **I can modify my own environment**.
+Example content:
 
 ```bash
-# Modify NixOS config
-sudo $EDITOR /etc/nixos/configuration.nix
-sudo nixos-rebuild switch --flake /etc/nixos
-
-# Modify hermes-agent config
-sudo $EDITOR /var/lib/hermes/.hermes/config.yaml
-systemctl restart hermes-agent
-
-# Or modify the flake config directly
-cd /etc/nixos/hermes-agent
-git pull
-sudo nixos-rebuild switch --flake /etc/nixos
+MINIMAX_API_KEY=replace-with-real-key
 ```
 
-## Troubleshooting
+The tracked template is `data/secrets/hermes.env.template`; the real `data/secrets/hermes.env` is ignored by Git.
 
-### hermes-agent won't start
+## Post-install checks
 
 ```bash
-# Check logs
+systemctl is-active hermes-agent
 journalctl -u hermes-agent -n 100 --no-pager
-
-# Run doctor
-hermes-agent gateway --doctor
-
-# Check config
-cat /var/lib/hermes/.hermes/config.yaml
-
-# Verify environment file exists and has restrictive permissions
-sudo ls -l /var/lib/hermes/secrets/hermes.env
-sudo systemctl show hermes-agent -p EnvironmentFiles
+hermes status
+hermes tools list
+sudo ss -tlnp | grep -E ':22|:8080'
+sudo stat -c '%U:%G %a %n' /var/lib/hermes/secrets /var/lib/hermes/secrets/hermes.env
 ```
 
-### NixOS won't rebuild
+Expected network posture:
+
+- SSH is reachable only where intended.
+- Hermes gateway is bound to `127.0.0.1` unless you deliberately changed it.
+
+## Validation
+
+CI currently runs:
+
+- Bash syntax checks via `tests/shell-syntax.sh`
+- ShellCheck with `--severity=error`
+- `nix flake metadata ./system/nixos --accept-flake-config`
+
+Local equivalent:
 
 ```bash
-# Verbose trace
-sudo nixos-rebuild switch --show-trace --verbose
-
-# Check flake
-cd /etc/nixos
-git log --oneline -5
-git diff
+tests/shell-syntax.sh
+shellcheck --severity=error scripts/*.sh boot-image/*.sh boot-image/overlay/auto-deploy.sh boot-image/overlay/usr/local/bin/hw-detect boot-image/overlay/usr/local/bin/wifi-setup
+nix flake metadata ./system/nixos --accept-flake-config
 ```
 
-### Can't SSH after install
+## Hardening and rollback
 
-```bash
-# From local console
-sudo systemctl status sshd
-sudo ss -tlnp | grep :22
+Read `docs/hardening-runbook.md` before deploying to real hardware. It covers:
 
-# Reset SSH keys (if known_hosts mismatch)
-ssh-keygen -R hermes-node.local
-```
+- credential handling
+- destructive disk checks
+- backups before rebuild/reinstall
+- NixOS rollback
+- live verification checks
+- gateway/SSH exposure assumptions
 
-### Full system recovery
+## Roadmap
 
-```bash
-# Boot from USB → NixOS installer
-# Mount the installed system
-sudo cryptsetup open /dev/nvme0n1p2 hermes
-sudo mount /dev/mapper/hermes /mnt
-sudo mount /dev/nvme0n1p1 /mnt/boot/efi
-sudo nixos-enter  # now you're in the broken system
-```
+Near-term cleanup that would make this easier for others to reuse:
 
-## Architecture
+- parameterize hostname, admin username, provider, model, and gateway binding
+- add a VM-based smoke test for the NixOS configuration
+- replace historical hardware-specific notes with a cleaner compatibility matrix
+- document a fully manual install path and a fully automated path separately
+- add screenshots or terminal transcripts of a successful install
+- choose and add an explicit open-source license
 
-```
-HERMES AGENT (Python)
-  ├── run_agent.py         — Core conversation loop
-  ├── cli.py               — Interactive CLI
-  ├── gateway/             — Messaging platform adapters
-  ├── skills/             — Bundled skills (github-code-review, etc.)
-  ├── plugins/             — Plugin system (memory, context_engine, etc.)
-  └── tools/               — Tool registry + implementations
+## Safety note
 
-NIXOS MODULE (hermes-agent.nixosModules.default)
-  ├── User/group creation
-  ├── State directory setup (tmpfiles.d)
-  ├── Config generation (YAML from Nix attrset)
-  ├── Document seeding
-  ├── Plugin symlinking
-  ├── Environment file generation
-  └── systemd service definition
-
-SYSTEM (NixOS 24.05)
-  ├── Linux kernel
-  ├── systemd
-  ├── Docker + Ubuntu 24.04 container (agent sandbox with sudo)
-  ├── Nix (flakes-enabled)
-  └── SSH
-
-HARDWARE
-  └── 512GB NVMe SSD
-```
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `/etc/nixos/flake.nix` | System definition |
-| `/etc/nixos/hermes-agent/` | hermes-agent source |
-| `/var/lib/hermes/secrets/hermes.env` | Runtime credentials, mode 0600, not committed |
-| `/var/lib/hermes/.hermes/logs/` | Logs |
-| `/var/lib/hermes/wiki/` | Wiki git repo |
-| `/var/lib/hermes/skills/` | Skills git repo |
-| `docs/hardening-runbook.md` | Threat model, backup, rollback, and live verification checks |
-
-## Build Verification Checklist
-
-- [ ] `nix flake metadata /path/to/hermes-bootstrap/system/nixos` — parses and resolves inputs without error
-- [ ] `sudo nixos-rebuild build --flake /path/to/hermes-bootstrap/system/nixos#hermes` — builds successfully
-- [ ] Boot test: VM starts, SSH accessible
-- [ ] hermes-agent.service starts without error
-- [ ] `hermes status` returns version and status
-- [ ] API key configured → LLM responds
-- [ ] `hermes tools list` shows tools
-- [ ] Wiki accessible, git clean
-- [ ] Skills directory populated
-- [ ] Memory directory writable
-
-## What "Online" Looks Like
-
-```
-$ systemctl status hermes-agent
-● hermes-agent.service - Hermes Agent Gateway
-     Loaded: loaded (/etc/nixos/result/lib/systemd/system/hermes-agent.service; enabled)
-     Active: active (running) since ...
-   Main PID: 1234 (hermes)
-      Tasks: 12 (limit: 4915)
-     Memory: 256M
-        CPU: 1.2s
-```
-
-```
-$ hermes status
-  ╔══════════════════════════════════════════╗
-  ║  HERMES v2.1.4                           ║
-  ║  Model: minimax/minimax-m2.7             ║
-  ║  Provider: minimax                        ║
-  ║  State: /var/lib/hermes/.hermes          ║
-  ║  Uptime: 42m                             ║
-  ║  Memory: 2.3GB indexed                   ║
-  ║  Plugins: 12 loaded                      ║
-  ╚══════════════════════════════════════════╝
-```
+This project is for self-hosted agent infrastructure. It intentionally gives the agent a powerful execution environment. Treat deployments as privileged systems: isolate them, back them up, review secrets handling, and do not expose services publicly without a separate security review.

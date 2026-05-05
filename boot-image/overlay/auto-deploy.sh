@@ -489,7 +489,7 @@ echo "Next:"
 echo "  1. Remove the USB stick"
 echo "  2. The system will reboot into NixOS"
 echo "  3. Find the IP address: nmap -sn 192.168.1.0/24 | grep hermes-node"
-echo "  4. SSH: ssh steve@<ip> (or hermes@<ip>)"
+echo "  4. SSH: ssh hermes-admin@<ip> (or hermes@<ip>)"
 echo "  5. Add your API key: sudo nano /var/lib/hermes/secrets/hermes.env"
 echo ""
 
