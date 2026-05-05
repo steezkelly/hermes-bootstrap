@@ -250,7 +250,10 @@ Near-term cleanup that would make this easier for others to reuse:
 - replace historical hardware-specific notes with a cleaner compatibility matrix
 - document a fully manual install path and a fully automated path separately
 - add screenshots or terminal transcripts of a successful install
-- choose and add an explicit open-source license
+
+## License
+
+Apache-2.0. See `LICENSE`.
 
 ## Safety note
 
