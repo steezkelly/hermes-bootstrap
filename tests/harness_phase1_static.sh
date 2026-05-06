@@ -62,6 +62,8 @@ assert_not_contains "$repo_root/system/nixos/harness.nix" 'Persistent = true;[[:
 assert_contains "$repo_root/system/nixos/harness.nix" 'OnCalendar = "\*-\*-\* 06:00:00";'
 assert_contains "$repo_root/system/nixos/harness.nix" 'Persistent = true;'
 assert_contains "$repo_root/system/nixos/harness.nix" 'InaccessiblePaths = \[ "-/var/lib/hermes/secrets" \];'
+assert_contains "$repo_root/system/nixos/harness.nix" 'StateDirectory = "hermes/delivery/state";'
+assert_contains "$repo_root/system/nixos/harness.nix" 'StateDirectoryMode = "2770";'
 assert_contains "$repo_root/system/nixos/flake.nix" '\./harness\.nix'
 assert_contains "$repo_root/.github/workflows/ci.yml" 'tests/harness_phase1_static\.sh'
 assert_contains "$repo_root/.github/workflows/ci.yml" 'python3 -m pytest -q'

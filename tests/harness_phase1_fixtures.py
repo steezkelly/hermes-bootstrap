@@ -474,6 +474,8 @@ def test_static_nixos_harness_contract() -> None:
     assert "EnvironmentFile = \"-/var/lib/hermes/delivery/ntfy.env\";" in harness_nix
     assert "d /var/lib/hermes/delivery 2750 hermes-delivery hermes" in harness_nix
     assert "d /var/lib/hermes/delivery/state 2770 hermes-delivery hermes" in harness_nix
+    assert "StateDirectory = \"hermes/delivery/state\";" in harness_nix
+    assert "StateDirectoryMode = \"2770\";" in harness_nix
     assert "ReadWritePaths = lib.mkForce [ \"/var/lib/hermes/delivery/state\" ];" in harness_nix
     assert "User = \"hermes-delivery\";" in harness_nix
     assert "InaccessiblePaths = [ \"-/var/lib/hermes/secrets\" ];" in harness_nix

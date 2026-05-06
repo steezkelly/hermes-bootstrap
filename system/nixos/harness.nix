@@ -128,6 +128,8 @@ in
       User = "hermes-delivery";
       ExecStart = "${phase2DeliverySend}/bin/hermes-phase2-delivery-brief-send";
       EnvironmentFile = "-/var/lib/hermes/delivery/ntfy.env";
+      StateDirectory = "hermes/delivery/state";
+      StateDirectoryMode = "2770";
       ReadWritePaths = lib.mkForce [ "/var/lib/hermes/delivery/state" ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/harness"
