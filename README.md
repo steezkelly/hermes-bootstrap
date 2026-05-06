@@ -96,6 +96,7 @@ hermes-bootstrap/
 │   ├── local-artifact-policy.md
 │   ├── node-harness-phase1.md
 │   ├── phase1-live-validation.md
+│   ├── phase2-boundaries.md
 │   └── public-audit.md
 ├── scripts/
 │   ├── backup-memories.py
@@ -278,6 +279,7 @@ Expected network posture:
 - Phase 1 harness outputs are readable to the `hermes` group under `/var/lib/hermes/{harness,events,reports}`.
 
 For the full hardware checklist, use `docs/phase1-live-validation.md`.
+For the next push-delivery design boundary, use `docs/phase2-boundaries.md`.
 
 ## Validation
 
@@ -328,7 +330,7 @@ Near-term cleanup that would make this easier for others to reuse:
 - replace historical hardware-specific notes with a cleaner compatibility matrix
 - document a fully automated boot-image path separately from the manual installer path
 - add screenshots or terminal transcripts of a successful install
-- design Phase 2 push delivery only after Phase 1 live validation remains stable
+- implement Phase 2 push delivery only after Phase 1 live validation remains stable and `docs/phase2-boundaries.md` is resolved
 
 ## License
 

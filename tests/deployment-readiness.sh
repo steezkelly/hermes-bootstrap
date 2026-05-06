@@ -86,6 +86,10 @@ assert_contains "$repo_root/docs/hardening-runbook.md" 'docs/phase1-live-validat
 assert_contains "$repo_root/docs/phase1-live-validation.md" 'sudo systemctl start hermes-node-health-watchdog\.service'
 assert_contains "$repo_root/docs/phase1-live-validation.md" 'sudo -u hermes-harness test ! -r /var/lib/hermes/secrets/hermes\.env'
 assert_contains "$repo_root/docs/phase1-live-validation.md" 'Only after this is stable should Phase 2 add push delivery'
+assert_contains "$repo_root/README.md" 'docs/phase2-boundaries\.md'
+assert_contains "$repo_root/docs/phase2-boundaries.md" 'local artifacts remain the source of truth'
+assert_contains "$repo_root/docs/phase2-boundaries.md" 'raw journal export'
+assert_contains "$repo_root/docs/phase2-boundaries.md" 'static test proving no raw `/var/lib/hermes/secrets/hermes.env` dependency'
 assert_not_contains "$repo_root/system/nixos/flake.nix" 'generic-extlinux-compatible'
 
 # Reproducible live testing should use a checked-in lock file.
