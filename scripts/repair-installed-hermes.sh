@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Non-destructive repair for an already-installed Hermes NixOS node.
 # Fixes shared Hermes state permissions, removes deprecated MESSAGING_CWD,
-# writes terminal.cwd into config.yaml, and adds a systemd UMask drop-in.
+# writes terminal.cwd into config.yaml, and adds a systemd drop-in that keeps
+# service-created Hermes state group-readable after restarts.
 set -euo pipefail
 
 GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; RESET='\033[0m'
@@ -220,6 +221,8 @@ install_admin_ssh_keys_if_available() {
 
 install_systemd_umask_dropin_if_possible() {
   local root="$1"
+  local state="$2"
+  local gid="$3"
   local prefix="$root"
   [[ "$root" == "/" ]] && prefix=""
   local dropin_dir="$prefix/etc/systemd/system/hermes-agent.service.d"
@@ -236,15 +239,16 @@ install_systemd_umask_dropin_if_possible() {
     return 0
   fi
 
-  if ! cat > "$dropin_file" <<'EOF'
+  if ! cat > "$dropin_file" <<EOF
 [Service]
 UMask=0007
+ExecStartPost=+/bin/sh -c 'sleep 5; if [ -d "$state" ]; then chgrp -R "$gid" "$state" || true; find "$state" -type d -exec chmod 2770 {} + || true; find "$state" -type f -exec chmod g+rw,o-rwx {} + || true; fi'
 EOF
   then
     warn "Could not write $dropin_file; continuing with declarative /etc/nixos UMask=0007 fix only."
     return 0
   fi
-  log "Installed systemd UMask drop-in for hermes-agent.service"
+  log "Installed systemd admin-state permissions drop-in for hermes-agent.service"
 }
 
 repair_root() {
@@ -296,7 +300,7 @@ repair_root() {
 
   copy_nixos_sources_if_available "$root"
   install_admin_ssh_keys_if_available "$root"
-  install_systemd_umask_dropin_if_possible "$root"
+  install_systemd_umask_dropin_if_possible "$root" "$state" "$gid"
 
   if [[ "$root" == "/" ]]; then
     log "Reloading systemd and restarting hermes-agent.service"

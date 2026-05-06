@@ -162,8 +162,23 @@ Before merging changes:
 
 ```bash
 tests/shell-syntax.sh
-shellcheck --severity=error scripts/*.sh boot-image/*.sh boot-image/overlay/auto-deploy.sh boot-image/overlay/usr/local/bin/hw-detect boot-image/overlay/usr/local/bin/wifi-setup
+tests/deployment-readiness.sh
+tests/boot-image-static.sh
+tests/container-mode-static.sh
+tests/harness_phase1_static.sh
+python3 -m pytest -q
+shellcheck --severity=error scripts/*.sh boot-image/*.sh boot-image/overlay/auto-deploy.sh boot-image/overlay/usr/local/bin/hw-detect boot-image/overlay/usr/local/bin/wifi-setup tests/*.sh
 nix flake metadata ./system/nixos --accept-flake-config
 ```
 
-The CI workflow runs the same shell and Nix metadata checks on pull requests and pushes to `master`.
+Live-node validation adds one operator check after repair or rebuild:
+
+```bash
+sudo -u hermes-admin HERMES_HOME=/var/lib/hermes/.hermes hermes status
+```
+
+If this fails with `PermissionError` on `/var/lib/hermes/.hermes/cron/jobs.json`, repair the installed node with `scripts/repair-installed-hermes.sh`. Hermes cron currently creates its state directory as service-owned `0700`; the repair path reapplies `2770` directory and group-readable file permissions after service restarts so console admins in the `hermes` group can inspect status. The imperative drop-in may warn on read-only NixOS `/etc/systemd` layouts; that is acceptable only if `systemctl cat hermes-agent` already shows the declarative `UMask=0007` and `ExecStartPost` state-permission hook from `system/nixos/flake.nix`. Phase 1 harness itself remains systemd-timer based and does not depend on Hermes cron.
+
+`pytest.ini` intentionally restricts Python collection to `tests/` and the Phase 1 harness behavior fixtures. Do not run bare pytest without this config from a copied tree containing `boot-image/rootfs` or `system/nixos/hermes-agent-src`; those are deployment/vendor artifacts, not this repository's test suite.
+
+The CI workflow runs the same shell, Python, and Nix metadata checks on pull requests and pushes to `master`.

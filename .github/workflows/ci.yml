@@ -32,6 +32,9 @@ jobs:
       - name: Check container mode hardening invariants
         run: tests/container-mode-static.sh
 
+      - name: Check Phase 1 harness invariants
+        run: tests/harness_phase1_static.sh
+
       - name: Unit test container mode preflight
         run: tests/container-mode-preflight-unit.sh
 
@@ -44,6 +47,19 @@ jobs:
             boot-image/overlay/usr/local/bin/hw-detect \
             boot-image/overlay/usr/local/bin/wifi-setup \
             tests/*.sh
+
+  python:
+    name: Python harness behavior tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install pytest
+        run: python3 -m pip install pytest
+
+      - name: Run Python behavior tests
+        run: python3 -m pytest -q
 
   nix:
     name: Nix flake validation

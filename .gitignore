@@ -31,6 +31,9 @@ usb-backup-*/
 /auto-deploy.sh
 
 # Build caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
 .fuse_*
 *.swp
 *.swo
