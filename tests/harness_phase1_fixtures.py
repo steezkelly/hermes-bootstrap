@@ -223,6 +223,69 @@ def test_hermes_status_success_has_no_detail(monkeypatch, tmp_path: Path) -> Non
     assert "sk-c" not in json.dumps(result)
 
 
+def test_phase2_delivery_brief_uses_local_artifacts_only(tmp_path: Path) -> None:
+    load_module("harness_common")
+    report = load_module("render_daily_report")
+    delivery = load_module("render_delivery_brief")
+
+    (tmp_path / "harness").mkdir()
+    (tmp_path / "events").mkdir()
+    (tmp_path / "reports" / "daily").mkdir(parents=True)
+    (tmp_path / "harness" / "latest-sensors.json").write_text(json.dumps({"overall_status": "critical", "sensors": []}))
+    (tmp_path / "events" / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "time": "2026-05-06T07:00:00Z",
+                "id": "hermes.state.cron.permission-regression",
+                "status": "critical",
+                "summary": "Cron path regressed token=secret-value",
+            }
+        )
+        + "\n"
+    )
+    report.write_report(tmp_path, date="2026-05-06")
+
+    out = delivery.render(tmp_path, date="2026-05-06", max_chars=1200)
+
+    assert out.startswith("Hermes node brief — 2026-05-06")
+    assert "Status: Critical" in out
+    assert str(tmp_path / "reports" / "daily" / "2026-05-06.md") in out
+    assert "hermes.state.cron.permission-regression" in out
+    assert "token=[REDACTED]" in out
+    assert "secret-value" not in out
+    assert "/var/lib/hermes/secrets/hermes.env" not in out
+    assert "journalctl" not in out
+
+
+def test_phase2_delivery_brief_is_bounded(tmp_path: Path) -> None:
+    load_module("harness_common")
+    delivery = load_module("render_delivery_brief")
+
+    (tmp_path / "harness").mkdir()
+    (tmp_path / "events").mkdir()
+    (tmp_path / "reports" / "daily").mkdir(parents=True)
+    (tmp_path / "harness" / "latest-sensors.json").write_text(json.dumps({"overall_status": "warning", "sensors": []}))
+    (tmp_path / "reports" / "daily" / "2026-05-06.md").write_text("# Report\n" + ("long line\n" * 200))
+
+    out = delivery.render(tmp_path, date="2026-05-06", max_chars=240)
+
+    assert len(out) <= 240
+    assert "truncated" in out
+    assert "inspect the local source paths" in out
+
+
+def test_static_phase2_delivery_contract() -> None:
+    delivery_script = (REPO_ROOT / "scripts" / "harness" / "render_delivery_brief.py").read_text()
+    phase2_doc = (REPO_ROOT / "docs" / "phase2-boundaries.md").read_text()
+
+    assert "no network send" in delivery_script
+    assert "events.jsonl" in delivery_script
+    assert "reports" in delivery_script
+    assert "/var/lib/hermes/secrets/hermes.env" not in delivery_script
+    assert "journalctl" not in delivery_script
+    assert "local report exists -> delivery renderer builds bounded message" in phase2_doc
+
+
 def test_static_nixos_harness_contract() -> None:
     harness_nix = (REPO_ROOT / "system" / "nixos" / "harness.nix").read_text()
     flake_nix = (REPO_ROOT / "system" / "nixos" / "flake.nix").read_text()

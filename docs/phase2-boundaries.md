@@ -108,6 +108,28 @@ Recommended test shape:
 - dry-run renderer test with no network
 - static test proving no raw `/var/lib/hermes/secrets/hermes.env` dependency
 
+## Minimal dry-run implementation boundary
+
+The first checked-in Phase 2 artifact is intentionally not a sender. `scripts/harness/render_delivery_brief.py` proves the deterministic conversion step only:
+
+```text
+/var/lib/hermes/reports/daily/YYYY-MM-DD.md
++ /var/lib/hermes/harness/latest-sensors.json
++ /var/lib/hermes/events/events.jsonl
+-> bounded operator message on stdout
+```
+
+Properties:
+
+- reads only local Phase 1 artifacts
+- performs no network delivery
+- uses the existing harness redaction helper before output
+- includes source paths and local inspect commands
+- caps message length with an explicit truncation note
+- keeps channel choice, credentials, live-send service, and acknowledgement state out of scope until live Phase 1 passes
+
+This lets the repo test the source-of-truth and no-secret/no-raw-journal contract while the live node finishes Phase 1 validation.
+
 ## Open design questions
 
 Decide before implementation:

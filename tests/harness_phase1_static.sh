@@ -29,7 +29,8 @@ for script in \
   "$repo_root/scripts/harness/hermes_health_sensor.py" \
   "$repo_root/scripts/harness/release_policy_sensor.py" \
   "$repo_root/scripts/harness/node_health_watchdog.py" \
-  "$repo_root/scripts/harness/render_daily_report.py"; do
+  "$repo_root/scripts/harness/render_daily_report.py" \
+  "$repo_root/scripts/harness/render_delivery_brief.py"; do
   [[ -s "$script" ]] || fail "Missing harness script: $script"
   python3 -m py_compile "$script"
 done
