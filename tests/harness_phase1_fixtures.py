@@ -309,6 +309,22 @@ def test_send_delivery_brief_rejects_email_until_transport_is_implemented(tmp_pa
     assert "No message was sent." in captured.err
 
 
+def test_send_delivery_brief_rejects_ntfy_without_topic(tmp_path: Path, capsys: Any, monkeypatch: Any) -> None:
+    load_module("harness_common")
+    load_module("render_daily_report")
+    load_module("render_delivery_brief")
+    sender = load_module("send_delivery_brief")
+    monkeypatch.delenv("HERMES_DELIVERY_NTFY_URL", raising=False)
+    monkeypatch.delenv("HERMES_DELIVERY_NTFY_TOPIC", raising=False)
+
+    exit_code = sender.main(["--base", str(tmp_path), "--date", "2026-05-06", "--transport", "ntfy"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "ntfy transport requires" in captured.err
+    assert "No message was sent." in captured.err
+
+
 def test_static_phase2_delivery_contract() -> None:
     delivery_script = (REPO_ROOT / "scripts" / "harness" / "render_delivery_brief.py").read_text()
     sender_script = (REPO_ROOT / "scripts" / "harness" / "send_delivery_brief.py").read_text()
@@ -322,6 +338,8 @@ def test_static_phase2_delivery_contract() -> None:
     assert "journalctl" not in delivery_script
     assert "journalctl" not in sender_script
     assert "transport == \"dry-run\"" in sender_script
+    assert 'transport == "ntfy"' in sender_script
+    assert "HERMES_DELIVERY_NTFY_TOPIC" in sender_script
     assert "email transport is not implemented" in sender_script
     assert "local report exists -> delivery renderer builds bounded message" in phase2_doc
 
@@ -350,7 +368,9 @@ def test_static_nixos_harness_contract() -> None:
     assert "Hermes Phase 2 delivery sender" in harness_nix
     assert "hermes-phase2-delivery-brief-send" in harness_nix
     assert "send_delivery_brief.py --base" in harness_nix
-    assert "--transport email" in harness_nix
+    assert "--transport ntfy" in harness_nix
+    assert "EnvironmentFile = \"-/var/lib/hermes/delivery/ntfy.env\";" in harness_nix
+    assert "d /var/lib/hermes/delivery 2750 hermes-delivery hermes" in harness_nix
     assert "User = \"hermes-delivery\";" in harness_nix
     assert "InaccessiblePaths = [ \"-/var/lib/hermes/secrets\" ];" in harness_nix
     assert "systemd.timers.hermes-phase2-delivery-brief" not in harness_nix

@@ -139,9 +139,11 @@ This lets the repo test the source-of-truth and no-secret/no-raw-journal contrac
 
 ## Recommended next live-send shape
 
-The repo now has a fail-closed delivery abstraction in `scripts/harness/send_delivery_brief.py`. Its only successful transport is `--transport dry-run`; `--transport email` exits non-zero with "email transport is not implemented" until the separate email discovery lane identifies a channel and credential plan.
+The repo now has a fail-closed delivery abstraction in `scripts/harness/send_delivery_brief.py`. Its successful transports are `--transport dry-run` and explicitly configured `--transport ntfy`; `--transport email` exits non-zero with "email transport is not implemented" until an email credential plan exists.
 
-NixOS also defines a disabled-by-default manual service named `hermes-phase2-delivery-brief-send`. It runs as `hermes-delivery`, has no timer, reads the local Phase 1 artifacts read-only, and currently invokes `send_delivery_brief.py --transport email`, which fails closed because no credential-backed email provider exists yet. This service is a safe placeholder for validating identity/sandbox wiring before adding Gmail API or SMTP code.
+NixOS also defines a disabled-by-default manual service named `hermes-phase2-delivery-brief-send`. It runs as `hermes-delivery`, has no timer, reads the local Phase 1 artifacts read-only, and currently invokes `send_delivery_brief.py --transport ntfy`. Without `/var/lib/hermes/delivery/ntfy.env` defining `HERMES_DELIVERY_NTFY_TOPIC` or `HERMES_DELIVERY_NTFY_URL`, it fails closed before sending.
+
+For an accountless push path, ntfy is the preferred first provider: publishing is a simple HTTP POST and topics are created on the fly with no signup. The caveat is that public `ntfy.sh` topics are capability URLs/topics: choose a high-entropy topic and treat it as a delivery secret. Receiving still requires subscribing from a phone/desktop app, but does not require creating a provider account.
 
 Fail-closed manual-send live validation passed on the appliance at commit `4b00cfd`: `hermes-delivery` existed, the service had no timer, `InaccessiblePaths=-/var/lib/hermes/secrets` was present, and a manual start failed closed with `Result=exit-code`, `ExecMainCode=1`, `ExecMainStatus=2`, plus the journal text `email transport is not implemented. No message was sent.` Both `hermes-delivery` and `hermes-harness` remained unable to read `/var/lib/hermes/secrets/hermes.env`.
 
@@ -162,11 +164,12 @@ Discovery found no ready email transport on the desktop or node:
 - no msmtp config
 - node has `python3`, `curl`, and `hermes`, but no mailer CLI
 
-The next code change should not add credentials directly to the existing Hermes secret env. Pick one of these explicit provider paths first:
+The next code change should not add credentials directly to the existing Hermes secret env. If avoiding account creation is the priority, prefer ntfy first:
 
-1. Gmail API on the node: add a small Python/curl sender plus a dedicated credential file or systemd credential containing only Gmail send scope material.
-2. SMTP on the node: add msmtp or equivalent plus a dedicated SMTP credential/config file.
-3. Hermes gateway bridge: treat it as a platform-message path, not email, and design an explicit node-to-gateway API/auth boundary.
+1. ntfy on the node: no provider account, no mailer package, HTTP POST via Python stdlib; requires only a high-entropy topic stored in `/var/lib/hermes/delivery/ntfy.env`.
+2. Gmail API on the node: add a small Python/curl sender plus a dedicated credential file or systemd credential containing only Gmail send scope material.
+3. SMTP on the node: add msmtp or equivalent plus a dedicated SMTP credential/config file.
+4. Hermes gateway bridge: treat it as a platform-message path, not email, and design an explicit node-to-gateway API/auth boundary.
 
 Until that choice is made, `hermes-phase2-delivery-brief-send.service` should keep failing closed and no timer should be added.
 

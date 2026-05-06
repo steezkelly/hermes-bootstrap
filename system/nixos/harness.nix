@@ -33,7 +33,7 @@ let
     runtimeInputs = [ python pkgs.coreutils ];
     text = ''
       export PYTHONPATH=${harnessDir}:''${PYTHONPATH:-}
-      exec ${python}/bin/python3 ${harnessDir}/send_delivery_brief.py --base ${harnessBase} --transport email
+      exec ${python}/bin/python3 ${harnessDir}/send_delivery_brief.py --base ${harnessBase} --transport ntfy
     '';
   };
   commonServiceConfig = {
@@ -76,6 +76,7 @@ in
     "d /var/lib/hermes/events 2770 hermes-harness hermes -"
     "d /var/lib/hermes/reports 2770 hermes-harness hermes -"
     "d /var/lib/hermes/reports/daily 2770 hermes-harness hermes -"
+    "d /var/lib/hermes/delivery 2750 hermes-delivery hermes -"
   ];
 
   systemd.services.hermes-node-health-watchdog = {
@@ -125,11 +126,13 @@ in
     serviceConfig = commonServiceConfig // {
       User = "hermes-delivery";
       ExecStart = "${phase2DeliverySend}/bin/hermes-phase2-delivery-brief-send";
+      EnvironmentFile = "-/var/lib/hermes/delivery/ntfy.env";
       ReadWritePaths = lib.mkForce [ ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/harness"
         "/var/lib/hermes/events"
         "/var/lib/hermes/reports"
+        "/var/lib/hermes/delivery"
       ];
     };
   };
