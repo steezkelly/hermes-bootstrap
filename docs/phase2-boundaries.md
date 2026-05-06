@@ -166,7 +166,19 @@ Before sending the first real notification:
 3. Write `/var/lib/hermes/delivery/ntfy.env` on the node as root with owner `hermes-delivery:hermes`, mode `0640`, and a single line `HERMES_DELIVERY_NTFY_TOPIC=<topic>`.
 4. Start `hermes-phase2-delivery-brief-send.service` manually once.
 5. Verify exactly one notification is received and the journal shows only delivery status/metadata, not the topic or payload secret.
-6. Keep Phase 2 timers disabled until dedupe/rate-limit state is implemented.
+6. Keep Phase 2 timers disabled until dedupe/rate-limit state is live-validated.
+
+## Delivery dedupe/rate-limit state
+
+The sender supports stateful safety gates for automation:
+
+- `--state-dir /var/lib/hermes/delivery/state` stores `delivery-state.json` owned by `hermes-delivery`.
+- `--once-per-date` skips an identical successful payload for the same date/transport.
+- `--min-interval-seconds 82800` skips any send if the last success was less than 23 hours ago.
+- Skips exit `0` and print a clear `Delivery skipped: ...` line; they do not contact ntfy.
+- Successful ntfy sends record date, transport, message SHA-256, and send epoch. The topic/url is not recorded.
+
+The manual send service is now wired with those gates but still has no timer. Live validation should prove both paths before enabling scheduled delivery: first one successful send creates state, then an immediate second manual start skips without emitting another ntfy request.
 
 First ntfy live-send validation at commit `f642acb` is PASS after corrected receipt diagnosis: one manual send returned `Result=success`, `ExecMainCode=0`, `ExecMainStatus=0`, and the service journal showed `Transport: ntfy` plus `Delivery status: HTTP 200`; no topic was printed and no Phase 2 timer existed. The message appeared in ntfy history/UI with the expected `Hermes node brief` title and the bounded daily-brief payload. The initial "not received" report was caused by manually copying a subscription URL from wrapped terminal output and truncating the final two topic characters, not by Hermes service code, node networking, or ntfy publish failure.
 
@@ -198,7 +210,7 @@ The next code change should not add credentials directly to the existing Hermes 
 3. SMTP on the node: add msmtp or equivalent plus a dedicated SMTP credential/config file.
 4. Hermes gateway bridge: treat it as a platform-message path, not email, and design an explicit node-to-gateway API/auth boundary.
 
-Until that choice is made, `hermes-phase2-delivery-brief-send.service` should keep failing closed and no timer should be added.
+Until ntfy receipt and dedupe/rate-limit state are live-validated, `hermes-phase2-delivery-brief-send.service` should remain manual-only and no timer should be added.
 
 ## Open design questions
 

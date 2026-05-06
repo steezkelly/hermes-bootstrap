@@ -274,6 +274,100 @@ def test_phase2_delivery_brief_is_bounded(tmp_path: Path) -> None:
     assert "inspect the local source paths" in out
 
 
+def _write_minimal_phase2_inputs(base: Path, date: str = "2026-05-06") -> None:
+    (base / "harness").mkdir()
+    (base / "events").mkdir()
+    (base / "reports" / "daily").mkdir(parents=True)
+    (base / "harness" / "latest-sensors.json").write_text(json.dumps({"overall_status": "ok", "sensors": []}))
+    (base / "reports" / "daily" / f"{date}.md").write_text(f"# Hermes Node Daily Local Brief — {date}\nStatus: OK\n")
+
+
+class _FakeNtfyResponse:
+    status = 200
+    headers = {"X-Message-Id": "test-message-id"}
+
+    def __enter__(self) -> "_FakeNtfyResponse":
+        return self
+
+    def __exit__(self, *_args: Any) -> None:
+        return None
+
+
+def test_send_delivery_brief_records_state_and_skips_duplicate_ntfy(
+    tmp_path: Path, capsys: Any, monkeypatch: Any
+) -> None:
+    load_module("harness_common")
+    load_module("render_daily_report")
+    load_module("render_delivery_brief")
+    sender = load_module("send_delivery_brief")
+    _write_minimal_phase2_inputs(tmp_path)
+    monkeypatch.setenv("HERMES_DELIVERY_NTFY_TOPIC", "test-topic")
+    calls: list[Any] = []
+
+    def fake_urlopen(request: Any, timeout: int) -> _FakeNtfyResponse:
+        calls.append((request, timeout))
+        return _FakeNtfyResponse()
+
+    monkeypatch.setattr(sender.urllib.request, "urlopen", fake_urlopen)
+    state_dir = tmp_path / "delivery-state"
+
+    first = sender.main([
+        "--base", str(tmp_path),
+        "--date", "2026-05-06",
+        "--transport", "ntfy",
+        "--state-dir", str(state_dir),
+        "--once-per-date",
+    ])
+    second = sender.main([
+        "--base", str(tmp_path),
+        "--date", "2026-05-06",
+        "--transport", "ntfy",
+        "--state-dir", str(state_dir),
+        "--once-per-date",
+    ])
+    captured = capsys.readouterr()
+
+    assert first == 0
+    assert second == 0
+    assert len(calls) == 1
+    assert "Delivery skipped: already sent ntfy brief for 2026-05-06" in captured.out
+    state = json.loads((state_dir / "delivery-state.json").read_text())
+    assert state["last_success"]["date"] == "2026-05-06"
+    assert state["last_success"]["transport"] == "ntfy"
+    assert state["last_success"]["message_sha256"]
+
+
+def test_send_delivery_brief_rate_limits_recent_success(tmp_path: Path, capsys: Any) -> None:
+    load_module("harness_common")
+    load_module("render_daily_report")
+    load_module("render_delivery_brief")
+    sender = load_module("send_delivery_brief")
+    _write_minimal_phase2_inputs(tmp_path)
+    state_dir = tmp_path / "delivery-state"
+    state_dir.mkdir()
+    (state_dir / "delivery-state.json").write_text(json.dumps({
+        "last_success": {
+            "date": "2026-05-06",
+            "transport": "ntfy",
+            "message_sha256": "previous",
+            "sent_at_epoch": 1000,
+        }
+    }))
+
+    exit_code = sender.main([
+        "--base", str(tmp_path),
+        "--date", "2026-05-06",
+        "--transport", "ntfy",
+        "--state-dir", str(state_dir),
+        "--min-interval-seconds", "3600",
+        "--now-epoch", "1200",
+    ])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Delivery skipped: last successful send was 200 seconds ago" in captured.out
+
+
 def test_send_delivery_brief_dry_run_uses_renderer_output(tmp_path: Path, capsys: Any) -> None:
     load_module("harness_common")
     load_module("render_daily_report")
@@ -339,6 +433,11 @@ def test_static_phase2_delivery_contract() -> None:
     assert "journalctl" not in sender_script
     assert "transport == \"dry-run\"" in sender_script
     assert 'transport == "ntfy"' in sender_script
+    assert "--state-dir" in sender_script
+    assert "--once-per-date" in sender_script
+    assert "--min-interval-seconds" in sender_script
+    assert "delivery-state.json" in sender_script
+    assert "message_sha256" in sender_script
     assert "HERMES_DELIVERY_NTFY_TOPIC" in sender_script
     assert "email transport is not implemented" in sender_script
     assert "local report exists -> delivery renderer builds bounded message" in phase2_doc
@@ -369,8 +468,13 @@ def test_static_nixos_harness_contract() -> None:
     assert "hermes-phase2-delivery-brief-send" in harness_nix
     assert "send_delivery_brief.py --base" in harness_nix
     assert "--transport ntfy" in harness_nix
+    assert "--state-dir ${harnessBase}/delivery/state" in harness_nix
+    assert "--once-per-date" in harness_nix
+    assert "--min-interval-seconds 82800" in harness_nix
     assert "EnvironmentFile = \"-/var/lib/hermes/delivery/ntfy.env\";" in harness_nix
     assert "d /var/lib/hermes/delivery 2750 hermes-delivery hermes" in harness_nix
+    assert "d /var/lib/hermes/delivery/state 2770 hermes-delivery hermes" in harness_nix
+    assert "ReadWritePaths = lib.mkForce [ \"/var/lib/hermes/delivery/state\" ];" in harness_nix
     assert "User = \"hermes-delivery\";" in harness_nix
     assert "InaccessiblePaths = [ \"-/var/lib/hermes/secrets\" ];" in harness_nix
     assert "systemd.timers.hermes-phase2-delivery-brief" not in harness_nix
