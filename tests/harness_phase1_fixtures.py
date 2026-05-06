@@ -303,4 +303,10 @@ def test_static_nixos_harness_contract() -> None:
     assert "OnUnitActiveSec = \"30min\";" in harness_nix
     assert "RemainAfterExit" not in harness_nix
     assert "Requires = [ \"hermes-agent.service\"" not in harness_nix
+    assert "hermes-phase2-delivery-brief-dry-run" in harness_nix
+    assert "Render Hermes Phase 2 delivery brief dry-run" in harness_nix
+    assert "render_delivery_brief.py --base" in harness_nix
+    assert "InaccessiblePaths = [ \"-/var/lib/hermes/secrets\" ];" in harness_nix
+    assert "systemd.timers.hermes-phase2-delivery-brief" not in harness_nix
+    assert "wantedBy = [ \"timers.target\" ];" in harness_nix
     assert "./harness.nix" in flake_nix

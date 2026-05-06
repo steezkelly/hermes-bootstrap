@@ -107,6 +107,9 @@ assert_contains "$repo_root/README.md" 'docs/phase2-boundaries\.md'
 assert_contains "$repo_root/docs/phase2-boundaries.md" 'local artifacts remain the source of truth'
 assert_contains "$repo_root/docs/phase2-boundaries.md" 'raw journal export'
 assert_contains "$repo_root/docs/phase2-boundaries.md" 'static test proving no raw `/var/lib/hermes/secrets/hermes.env` dependency'
+assert_contains "$repo_root/docs/phase2-boundaries.md" 'hermes-phase2-delivery-brief-dry-run'
+assert_contains "$repo_root/system/nixos/harness.nix" 'hermes-phase2-delivery-brief-dry-run'
+assert_not_contains "$repo_root/system/nixos/harness.nix" 'systemd\.timers\.hermes-phase2-delivery-brief'
 assert_not_contains "$repo_root/system/nixos/flake.nix" 'generic-extlinux-compatible'
 
 # Reproducible live testing should use a checked-in lock file.

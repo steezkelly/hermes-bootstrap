@@ -128,6 +128,8 @@ Properties:
 - caps message length with an explicit truncation note
 - keeps channel choice, credentials, live-send service, and acknowledgement state out of scope until live Phase 1 passes
 
+NixOS wires this renderer as a manual, disabled-by-default oneshot service named `hermes-phase2-delivery-brief-dry-run`. It has no timer and no `wantedBy`; operators can start it explicitly to inspect the would-be push payload in the service journal before any delivery channel exists.
+
 This lets the repo test the source-of-truth and no-secret/no-raw-journal contract while the live node finishes Phase 1 validation.
 
 ## Open design questions

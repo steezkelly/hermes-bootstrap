@@ -20,6 +20,14 @@ let
       exec ${python}/bin/python3 ${harnessDir}/render_daily_report.py --base ${harnessBase}
     '';
   };
+  phase2DeliveryDryRun = pkgs.writeShellApplication {
+    name = "hermes-phase2-delivery-brief-dry-run";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      export PYTHONPATH=${harnessDir}:''${PYTHONPATH:-}
+      exec ${python}/bin/python3 ${harnessDir}/render_delivery_brief.py --base ${harnessBase} --dry-run
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -80,6 +88,20 @@ in
     after = [ "hermes-node-health-watchdog.service" ];
     serviceConfig = commonServiceConfig // {
       ExecStart = "${dailyReport}/bin/hermes-daily-local-brief";
+    };
+  };
+
+  systemd.services.hermes-phase2-delivery-brief-dry-run = {
+    description = "Render Hermes Phase 2 delivery brief dry-run";
+    after = [ "hermes-daily-local-brief.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${phase2DeliveryDryRun}/bin/hermes-phase2-delivery-brief-dry-run";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/harness"
+        "/var/lib/hermes/events"
+        "/var/lib/hermes/reports"
+      ];
     };
   };
 
