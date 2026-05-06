@@ -145,6 +145,8 @@ NixOS also defines a disabled-by-default manual service named `hermes-phase2-del
 
 For an accountless push path, ntfy is the preferred first provider: publishing is a simple HTTP POST and topics are created on the fly with no signup. The caveat is that public `ntfy.sh` topics are capability URLs/topics: choose a high-entropy topic and treat it as a delivery secret. Receiving still requires subscribing from a phone/desktop app, but does not require creating a provider account.
 
+ntfy fail-closed live validation passed on the appliance at commit `e8fd44e`: `hermes-delivery` existed, `/var/lib/hermes/delivery` was `hermes-delivery:hermes` mode `2750`, the send service had `EnvironmentFile=-/var/lib/hermes/delivery/ntfy.env`, no Phase 2 timer existed, and removing `ntfy.env` made a manual start fail closed with `Result=exit-code`, `ExecMainCode=1`, `ExecMainStatus=2`, plus the journal text `ntfy transport requires HERMES_DELIVERY_NTFY_URL or HERMES_DELIVERY_NTFY_TOPIC. No message was sent.` Both `hermes-delivery` and `hermes-harness` remained unable to read `/var/lib/hermes/secrets/hermes.env`.
+
 Fail-closed manual-send live validation passed on the appliance at commit `4b00cfd`: `hermes-delivery` existed, the service had no timer, `InaccessiblePaths=-/var/lib/hermes/secrets` was present, and a manual start failed closed with `Result=exit-code`, `ExecMainCode=1`, `ExecMainStatus=2`, plus the journal text `email transport is not implemented. No message was sent.` Both `hermes-delivery` and `hermes-harness` remained unable to read `/var/lib/hermes/secrets/hermes.env`.
 
 The first actual delivery implementation should still be systemd-owned, not Hermes-cron-owned, and should remain disabled-by-default until one manual send is validated. Recommended choices before writing code:
@@ -154,6 +156,17 @@ The first actual delivery implementation should still be systemd-owned, not Herm
 - service identity: a separate least-privilege delivery user if credentials are required; do not grant `hermes-harness` secret access
 - payload: the dry-run renderer output exactly, not raw events or journals
 - live gate: one manual send succeeds once, then repeated sends are deduped/rate-limited before any timer is enabled
+
+## First ntfy live-send gate
+
+Before sending the first real notification:
+
+1. Generate a high-entropy topic on the node or desktop, for example `python3 - <<'PY'` with `secrets.token_urlsafe(32)`.
+2. Subscribe to `https://ntfy.sh/<topic>` in the ntfy phone app or web UI.
+3. Write `/var/lib/hermes/delivery/ntfy.env` on the node as root with owner `hermes-delivery:hermes`, mode `0640`, and a single line `HERMES_DELIVERY_NTFY_TOPIC=<topic>`.
+4. Start `hermes-phase2-delivery-brief-send.service` manually once.
+5. Verify exactly one notification is received and the journal shows only delivery status/metadata, not the topic or payload secret.
+6. Keep Phase 2 timers disabled until dedupe/rate-limit state is implemented.
 
 ## Credential/transport decision boundary
 
