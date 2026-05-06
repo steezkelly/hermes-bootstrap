@@ -87,7 +87,17 @@ Expected:
 
 - JSON parses.
 - `overall_status` is `ok`, `warning`, or `critical`.
+- A NixOS 24.05 support warning from `release.nixos24_05.unsupported` is an acceptable Phase 1 pass condition: the harness is correctly reporting that the base release is past bugfix/security support, not that the harness plumbing failed.
 - Events, if present, are bounded summaries and do not contain provider keys, bearer tokens, passwords, or raw journal dumps.
+- Historical pre-fix events may remain in `events.jsonl` and the same-day report after a repair. Treat recovered `hermes.cli.status` / `hermes.state.cron.permission-regression` events as evidence of the earlier incident plus recovery, not as a current failure, if `latest-sensors.json` now reports those checks as `ok` and the final admin readability check passes.
+
+If `python3` is unavailable on the admin `PATH`, discover the Nix Python used by the installed generation with:
+
+```bash
+ls /run/current-system/sw/bin/python3 /nix/store/*python3*/bin/python3* 2>/dev/null | head -1
+```
+
+Then use the discovered absolute path in place of `python3` for JSON inspection.
 
 ## 4. Render daily report once
 
