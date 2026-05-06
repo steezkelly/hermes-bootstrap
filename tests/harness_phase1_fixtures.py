@@ -346,6 +346,12 @@ def test_static_nixos_harness_contract() -> None:
     assert "hermes-phase2-delivery-brief-dry-run" in harness_nix
     assert "Render Hermes Phase 2 delivery brief dry-run" in harness_nix
     assert "render_delivery_brief.py --base" in harness_nix
+    assert "users.users.hermes-delivery" in harness_nix
+    assert "Hermes Phase 2 delivery sender" in harness_nix
+    assert "hermes-phase2-delivery-brief-send" in harness_nix
+    assert "send_delivery_brief.py --base" in harness_nix
+    assert "--transport email" in harness_nix
+    assert "User = \"hermes-delivery\";" in harness_nix
     assert "InaccessiblePaths = [ \"-/var/lib/hermes/secrets\" ];" in harness_nix
     assert "systemd.timers.hermes-phase2-delivery-brief" not in harness_nix
     assert "wantedBy = [ \"timers.target\" ];" in harness_nix

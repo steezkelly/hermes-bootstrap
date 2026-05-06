@@ -28,6 +28,14 @@ let
       exec ${python}/bin/python3 ${harnessDir}/render_delivery_brief.py --base ${harnessBase} --dry-run
     '';
   };
+  phase2DeliverySend = pkgs.writeShellApplication {
+    name = "hermes-phase2-delivery-brief-send";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      export PYTHONPATH=${harnessDir}:''${PYTHONPATH:-}
+      exec ${python}/bin/python3 ${harnessDir}/send_delivery_brief.py --base ${harnessBase} --transport email
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -55,6 +63,12 @@ in
     isSystemUser = true;
     group = "hermes";
     description = "Hermes node local observability harness";
+  };
+
+  users.users.hermes-delivery = {
+    isSystemUser = true;
+    group = "hermes";
+    description = "Hermes Phase 2 delivery sender";
   };
 
   systemd.tmpfiles.rules = [
@@ -96,6 +110,21 @@ in
     after = [ "hermes-daily-local-brief.service" ];
     serviceConfig = commonServiceConfig // {
       ExecStart = "${phase2DeliveryDryRun}/bin/hermes-phase2-delivery-brief-dry-run";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/harness"
+        "/var/lib/hermes/events"
+        "/var/lib/hermes/reports"
+      ];
+    };
+  };
+
+  systemd.services.hermes-phase2-delivery-brief-send = {
+    description = "Send Hermes Phase 2 delivery brief manually";
+    after = [ "hermes-daily-local-brief.service" ];
+    serviceConfig = commonServiceConfig // {
+      User = "hermes-delivery";
+      ExecStart = "${phase2DeliverySend}/bin/hermes-phase2-delivery-brief-send";
       ReadWritePaths = lib.mkForce [ ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/harness"

@@ -141,6 +141,8 @@ This lets the repo test the source-of-truth and no-secret/no-raw-journal contrac
 
 The repo now has a fail-closed delivery abstraction in `scripts/harness/send_delivery_brief.py`. Its only successful transport is `--transport dry-run`; `--transport email` exits non-zero with "email transport is not implemented" until the separate email discovery lane identifies a channel and credential plan.
 
+NixOS also defines a disabled-by-default manual service named `hermes-phase2-delivery-brief-send`. It runs as `hermes-delivery`, has no timer, reads the local Phase 1 artifacts read-only, and currently invokes `send_delivery_brief.py --transport email`, which fails closed because no credential-backed email provider exists yet. This service is a safe placeholder for validating identity/sandbox wiring before adding Gmail API or SMTP code.
+
 The first actual delivery implementation should still be systemd-owned, not Hermes-cron-owned, and should remain disabled-by-default until one manual send is validated. Recommended choices before writing code:
 
 - channel: email first if a local SMTP/Gmail path is already available; otherwise Telegram/Discord only with an explicit user-selected target

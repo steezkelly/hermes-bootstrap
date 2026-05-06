@@ -114,6 +114,9 @@ assert_contains "$repo_root/docs/phase2-boundaries.md" 'Recommended next live-se
 assert_contains "$repo_root/docs/phase2-boundaries.md" 'send_delivery_brief\.py'
 assert_contains "$repo_root/docs/phase2-boundaries.md" 'email transport is not implemented'
 assert_contains "$repo_root/system/nixos/harness.nix" 'hermes-phase2-delivery-brief-dry-run'
+assert_contains "$repo_root/system/nixos/harness.nix" 'hermes-phase2-delivery-brief-send'
+assert_contains "$repo_root/system/nixos/harness.nix" 'User = "hermes-delivery";'
+assert_contains "$repo_root/system/nixos/harness.nix" 'transport email'
 assert_not_contains "$repo_root/system/nixos/harness.nix" 'systemd\.timers\.hermes-phase2-delivery-brief'
 assert_not_contains "$repo_root/system/nixos/flake.nix" 'generic-extlinux-compatible'
 
