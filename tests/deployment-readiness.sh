@@ -81,6 +81,11 @@ assert_contains "$repo_root/scripts/repair-installed-hermes.sh" 'find "\$state" 
 assert_contains "$repo_root/scripts/repair-installed-hermes.sh" 'harness\.nix'
 assert_contains "$repo_root/scripts/repair-installed-hermes.sh" 'harness-scripts'
 assert_contains "$repo_root/system/nixos/flake.nix" 'system\.stateVersion = "24\.05";'
+assert_contains "$repo_root/README.md" 'docs/phase1-live-validation\.md'
+assert_contains "$repo_root/docs/hardening-runbook.md" 'docs/phase1-live-validation\.md'
+assert_contains "$repo_root/docs/phase1-live-validation.md" 'sudo systemctl start hermes-node-health-watchdog\.service'
+assert_contains "$repo_root/docs/phase1-live-validation.md" 'sudo -u hermes-harness test ! -r /var/lib/hermes/secrets/hermes\.env'
+assert_contains "$repo_root/docs/phase1-live-validation.md" 'Only after this is stable should Phase 2 add push delivery'
 assert_not_contains "$repo_root/system/nixos/flake.nix" 'generic-extlinux-compatible'
 
 # Reproducible live testing should use a checked-in lock file.

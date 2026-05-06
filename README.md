@@ -8,7 +8,8 @@ It turns a small server, mini PC, or spare x86_64 machine into a reproducible, s
 - Hermes Agent managed by systemd
 - isolated `/var/lib/hermes` state directory for memory, logs, skills, wiki, and workspace
 - provider credentials loaded from a root-owned env file, not committed config
-- Docker-backed agent execution environment for tool use and self-maintenance
+- native first-boot runtime by default, with optional container mode after cache/network provisioning
+- local Phase 1 observability harness: systemd timers, deterministic sensors, JSONL events, and daily Markdown reports
 - USB/NixOS installer workflows plus hardening and rollback notes
 
 This repository is intentionally infrastructure-focused. It does not include private memories, private wiki content, real API keys, or personal workspace data.
@@ -31,6 +32,7 @@ Current defaults are centralized in `system/nixos/deployment-options.nix`:
 | Hostname | `hermes-node` |
 | Gateway bind address | `127.0.0.1` |
 | Provider example | MiniMax via `/var/lib/hermes/secrets/hermes.env` |
+| Local harness | `hermes-harness` system user, systemd timers, `/var/lib/hermes/{harness,events,reports}` |
 
 Edit `system/nixos/deployment-options.nix` before deployment to change host identity, admin account, provider/model defaults, gateway binding, locale, or the secrets env-file path.
 
@@ -47,7 +49,7 @@ USB installer media
   v
 Target machine internal disk
   |
-  | NixOS + systemd + Docker + Hermes Agent
+  | NixOS + systemd + Hermes Agent + local harness timers
   v
 /var/lib/hermes
   |- .hermes/        runtime config, logs, sessions, memory
@@ -55,6 +57,9 @@ Target machine internal disk
   |- secrets/        provider credentials, mode 0600, never committed
   |- wiki/           optional private knowledge base seed
   |- skills/         optional skill seed
+  |- harness/        latest deterministic local sensor snapshot
+  |- events/         bounded harness event JSONL
+  |- reports/        daily local Markdown reports
   `- backups/        local backup target
 ```
 
@@ -89,11 +94,14 @@ hermes-bootstrap/
 │   ├── hardening-runbook.md
 │   ├── install-manual-nixos.md
 │   ├── local-artifact-policy.md
+│   ├── node-harness-phase1.md
+│   ├── phase1-live-validation.md
 │   └── public-audit.md
 ├── scripts/
 │   ├── backup-memories.py
 │   ├── create-nixos-findiso-usb.sh
 │   ├── deploy-hermes.sh
+│   ├── harness/
 │   ├── setup-hermes-agent.sh
 │   ├── update-nixos-usb-autodeploy.sh
 │   └── verify-bootstrap.sh
@@ -101,11 +109,14 @@ hermes-bootstrap/
 │   ├── agent-extra-packages.nix
 │   ├── deployment-options.nix
 │   ├── flake.nix
+│   ├── harness.nix
 │   ├── hardware-configuration.nix
 │   └── README.md
 └── tests/
     ├── deployment-readiness.sh
     ├── findiso-autodeploy-static.sh
+    ├── harness_phase1_static.sh
+    ├── harness_phase1_fixtures.py
     └── shell-syntax.sh
 ```
 
@@ -117,6 +128,7 @@ On the build/admin machine:
 - Git
 - Nix, if you want to validate the flake locally
 - ShellCheck, if you want to run shell lint locally
+- Python + pytest, if you want to run the Phase 1 harness behavior tests
 - Docker, only if building the experimental Alpine boot image
 - a NixOS minimal ISO for manual installer flows
 - a target x86_64 machine whose disk can be erased
@@ -140,6 +152,8 @@ cd hermes-bootstrap
 tests/shell-syntax.sh
 tests/findiso-autodeploy-static.sh
 tests/deployment-readiness.sh
+tests/harness_phase1_static.sh
+python3 -m pytest -q
 shellcheck --severity=error scripts/*.sh boot-image/*.sh boot-image/overlay/auto-deploy.sh boot-image/overlay/usr/local/bin/hw-detect boot-image/overlay/usr/local/bin/wifi-setup
 nix flake metadata ./system/nixos --accept-flake-config
 nix eval ./system/nixos#nixosConfigurations.hermes.config.networking.hostName --accept-flake-config
@@ -252,12 +266,18 @@ hermes status
 hermes tools list
 sudo ss -tlnp | grep -E ':22|:8080'
 sudo stat -c '%U:%G %a %n' /var/lib/hermes/secrets /var/lib/hermes/secrets/hermes.env
+systemctl list-timers 'hermes-*' --no-pager
+sudo systemctl start hermes-node-health-watchdog.service
+sudo systemctl start hermes-daily-local-brief.service
 ```
 
 Expected network posture:
 
 - SSH is reachable only where intended.
 - Hermes gateway is bound to `127.0.0.1` unless you deliberately changed it.
+- Phase 1 harness outputs are readable to the `hermes` group under `/var/lib/hermes/{harness,events,reports}`.
+
+For the full hardware checklist, use `docs/phase1-live-validation.md`.
 
 ## Validation
 
@@ -265,6 +285,8 @@ CI currently runs:
 
 - Bash syntax checks via `tests/shell-syntax.sh`
 - ShellCheck with `--severity=error`
+- Phase 1 harness static checks via `tests/harness_phase1_static.sh`
+- Python harness behavior tests via `pytest`
 - `nix flake metadata ./system/nixos --accept-flake-config`
 - targeted NixOS module/config evaluation for deployment defaults and package references
 
@@ -273,6 +295,12 @@ Local equivalent:
 ```bash
 tests/shell-syntax.sh
 tests/deployment-readiness.sh
+tests/findiso-autodeploy-static.sh
+tests/boot-image-static.sh
+tests/container-mode-static.sh
+tests/container-mode-preflight-unit.sh
+tests/harness_phase1_static.sh
+python3 -m pytest -q
 shellcheck --severity=error scripts/*.sh boot-image/*.sh boot-image/overlay/auto-deploy.sh boot-image/overlay/usr/local/bin/hw-detect boot-image/overlay/usr/local/bin/wifi-setup
 nix flake metadata ./system/nixos --accept-flake-config
 nix eval ./system/nixos#nixosConfigurations.hermes.config.networking.hostName --accept-flake-config
@@ -289,16 +317,18 @@ Read `docs/hardening-runbook.md` before deploying to real hardware. It covers:
 - backups before rebuild/reinstall
 - NixOS rollback
 - live verification checks
+- Phase 1 harness live validation
 - gateway/SSH exposure assumptions
 
 ## Roadmap
 
 Near-term cleanup that would make this easier for others to reuse:
 
-- add a VM-based smoke test for the NixOS configuration
+- add a VM-based smoke test for the NixOS configuration and Phase 1 timers
 - replace historical hardware-specific notes with a cleaner compatibility matrix
 - document a fully automated boot-image path separately from the manual installer path
 - add screenshots or terminal transcripts of a successful install
+- design Phase 2 push delivery only after Phase 1 live validation remains stable
 
 ## License
 

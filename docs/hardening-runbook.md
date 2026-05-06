@@ -171,7 +171,7 @@ shellcheck --severity=error scripts/*.sh boot-image/*.sh boot-image/overlay/auto
 nix flake metadata ./system/nixos --accept-flake-config
 ```
 
-Live-node validation adds one operator check after repair or rebuild:
+Live-node validation adds the Phase 1 harness checklist in `docs/phase1-live-validation.md` plus one Hermes admin readability check after repair or rebuild:
 
 ```bash
 sudo -u hermes-admin HERMES_HOME=/var/lib/hermes/.hermes hermes status
