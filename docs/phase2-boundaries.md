@@ -168,6 +168,19 @@ Before sending the first real notification:
 5. Verify exactly one notification is received and the journal shows only delivery status/metadata, not the topic or payload secret.
 6. Keep Phase 2 timers disabled until dedupe/rate-limit state is implemented.
 
+First ntfy live-send validation at commit `f642acb` is PARTIAL: one manual send returned `Result=success`, `ExecMainCode=0`, `ExecMainStatus=0`, and the service journal showed `Transport: ntfy` plus `Delivery status: HTTP 200`; no topic was printed and no Phase 2 timer existed. The subscribed client did not display a notification, so server-side delivery was accepted by ntfy.sh but end-user receipt was not validated. Do not add a timer or repeat sends automatically from this state.
+
+Because the validation topic was surfaced in operator handoff output, treat that topic as spent after debugging and rotate to a fresh high-entropy topic before any durable delivery setup.
+
+## ntfy receipt diagnostic gate
+
+Diagnose receipt separately from Hermes delivery. No further Hermes service sends should occur unless the operator explicitly authorizes exactly one additional send. Safe next checks before any resend:
+
+1. Confirm the ntfy app/web subscription topic exactly matches `/var/lib/hermes/delivery/ntfy.env` without printing the topic into shared logs.
+2. Check browser/app notification permission, battery/background restrictions, and whether the web page/app is actively subscribed.
+3. Use ntfy's web UI for the topic to inspect whether the message appears there before testing mobile push.
+4. If an additional controlled publish is authorized, send a short non-Hermes test message to the same topic or a freshly rotated topic, record whether web/app receives it, then stop again.
+
 ## Credential/transport decision boundary
 
 Discovery found no ready email transport on the desktop or node:
