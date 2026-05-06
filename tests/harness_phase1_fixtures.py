@@ -464,6 +464,9 @@ def test_static_nixos_harness_contract() -> None:
     assert "Render Hermes Phase 2 delivery brief dry-run" in harness_nix
     assert "render_delivery_brief.py --base" in harness_nix
     assert "users.users.hermes-delivery" in harness_nix
+    assert "system.activationScripts.hermesHarnessDirectories" in harness_nix
+    assert "install -d -o hermes-delivery -g hermes -m 2770 /var/lib/hermes/delivery/state" in harness_nix
+    assert "systemd.tmpfiles.rules" not in harness_nix
     assert "Hermes Phase 2 delivery sender" in harness_nix
     assert "hermes-phase2-delivery-brief-send" in harness_nix
     assert "send_delivery_brief.py --base" in harness_nix
@@ -472,10 +475,8 @@ def test_static_nixos_harness_contract() -> None:
     assert "--once-per-date" in harness_nix
     assert "--min-interval-seconds 82800" in harness_nix
     assert "EnvironmentFile = \"-/var/lib/hermes/delivery/ntfy.env\";" in harness_nix
-    assert "d /var/lib/hermes/delivery 2750 hermes-delivery hermes" in harness_nix
-    assert "d /var/lib/hermes/delivery/state 2770 hermes-delivery hermes" in harness_nix
-    assert "StateDirectory = \"hermes/delivery/state\";" in harness_nix
-    assert "StateDirectoryMode = \"2770\";" in harness_nix
+    assert "install -d -o hermes-delivery -g hermes -m 2750 /var/lib/hermes/delivery" in harness_nix
+    assert "install -d -o hermes-delivery -g hermes -m 2770 /var/lib/hermes/delivery/state" in harness_nix
     assert "ReadWritePaths = lib.mkForce [ \"/var/lib/hermes/delivery/state\" ];" in harness_nix
     assert "User = \"hermes-delivery\";" in harness_nix
     assert "InaccessiblePaths = [ \"-/var/lib/hermes/secrets\" ];" in harness_nix

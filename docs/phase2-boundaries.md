@@ -178,7 +178,9 @@ The sender supports stateful safety gates for automation:
 - Skips exit `0` and print a clear `Delivery skipped: ...` line; they do not contact ntfy.
 - Successful ntfy sends record date, transport, message SHA-256, and send epoch. The topic/url is not recorded.
 
-The manual send service is now wired with those gates but still has no timer. Live validation should prove both paths before enabling scheduled delivery: first one successful send creates state, then an immediate second manual start skips without emitting another ntfy request.
+The manual send service is now wired with those gates but still has no timer. Directory materialization is handled by `system.activationScripts.hermesHarnessDirectories`, not `systemd.tmpfiles.rules`, because live validation found `systemd-tmpfiles-resetup.service` can fail with status 73 unsafe path transitions when `/var/lib/hermes` is owned by `hermes` and child directories are owned by service users (`hermes-harness`/`hermes-delivery`). The activation script explicitly creates `/var/lib/hermes/delivery/state` as `hermes-delivery:hermes` mode `2770` before service use.
+
+Live validation should prove both paths before enabling scheduled delivery: first one successful send creates state, then an immediate second manual start skips without emitting another ntfy request.
 
 First ntfy live-send validation at commit `f642acb` is PASS after corrected receipt diagnosis: one manual send returned `Result=success`, `ExecMainCode=0`, `ExecMainStatus=0`, and the service journal showed `Transport: ntfy` plus `Delivery status: HTTP 200`; no topic was printed and no Phase 2 timer existed. The message appeared in ntfy history/UI with the expected `Hermes node brief` title and the bounded daily-brief payload. The initial "not received" report was caused by manually copying a subscription URL from wrapped terminal output and truncating the final two topic characters, not by Hermes service code, node networking, or ntfy publish failure.
 

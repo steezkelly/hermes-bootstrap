@@ -71,14 +71,14 @@ in
     description = "Hermes Phase 2 delivery sender";
   };
 
-  systemd.tmpfiles.rules = [
-    "d /var/lib/hermes/harness 2770 hermes-harness hermes -"
-    "d /var/lib/hermes/events 2770 hermes-harness hermes -"
-    "d /var/lib/hermes/reports 2770 hermes-harness hermes -"
-    "d /var/lib/hermes/reports/daily 2770 hermes-harness hermes -"
-    "d /var/lib/hermes/delivery 2750 hermes-delivery hermes -"
-    "d /var/lib/hermes/delivery/state 2770 hermes-delivery hermes -"
-  ];
+  system.activationScripts.hermesHarnessDirectories.text = ''
+    ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/harness
+    ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/events
+    ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports
+    ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/daily
+    ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2750 /var/lib/hermes/delivery
+    ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2770 /var/lib/hermes/delivery/state
+  '';
 
   systemd.services.hermes-node-health-watchdog = {
     description = "Hermes node Phase 1 local health watchdog";
