@@ -274,15 +274,55 @@ def test_phase2_delivery_brief_is_bounded(tmp_path: Path) -> None:
     assert "inspect the local source paths" in out
 
 
+def test_send_delivery_brief_dry_run_uses_renderer_output(tmp_path: Path, capsys: Any) -> None:
+    load_module("harness_common")
+    load_module("render_daily_report")
+    load_module("render_delivery_brief")
+    sender = load_module("send_delivery_brief")
+
+    (tmp_path / "harness").mkdir()
+    (tmp_path / "events").mkdir()
+    (tmp_path / "reports" / "daily").mkdir(parents=True)
+    (tmp_path / "harness" / "latest-sensors.json").write_text(json.dumps({"overall_status": "ok", "sensors": []}))
+    (tmp_path / "reports" / "daily" / "2026-05-06.md").write_text("# Hermes Node Daily Local Brief — 2026-05-06\nStatus: OK\n")
+
+    exit_code = sender.main(["--base", str(tmp_path), "--date", "2026-05-06", "--transport", "dry-run"])
+    out = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "Hermes node brief — 2026-05-06" in out
+    assert "Transport: dry-run" in out
+    assert "No message was sent." in out
+
+
+def test_send_delivery_brief_rejects_email_until_transport_is_implemented(tmp_path: Path, capsys: Any) -> None:
+    load_module("harness_common")
+    load_module("render_daily_report")
+    load_module("render_delivery_brief")
+    sender = load_module("send_delivery_brief")
+
+    exit_code = sender.main(["--base", str(tmp_path), "--date", "2026-05-06", "--transport", "email"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 2
+    assert "email transport is not implemented" in captured.err
+    assert "No message was sent." in captured.err
+
+
 def test_static_phase2_delivery_contract() -> None:
     delivery_script = (REPO_ROOT / "scripts" / "harness" / "render_delivery_brief.py").read_text()
+    sender_script = (REPO_ROOT / "scripts" / "harness" / "send_delivery_brief.py").read_text()
     phase2_doc = (REPO_ROOT / "docs" / "phase2-boundaries.md").read_text()
 
     assert "no network send" in delivery_script
     assert "events.jsonl" in delivery_script
     assert "reports" in delivery_script
     assert "/var/lib/hermes/secrets/hermes.env" not in delivery_script
+    assert "/var/lib/hermes/secrets/hermes.env" not in sender_script
     assert "journalctl" not in delivery_script
+    assert "journalctl" not in sender_script
+    assert "transport == \"dry-run\"" in sender_script
+    assert "email transport is not implemented" in sender_script
     assert "local report exists -> delivery renderer builds bounded message" in phase2_doc
 
 

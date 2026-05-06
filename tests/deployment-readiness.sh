@@ -111,6 +111,8 @@ assert_contains "$repo_root/docs/phase2-boundaries.md" 'hermes-phase2-delivery-b
 assert_contains "$repo_root/docs/phase2-boundaries.md" 'systemctl status.*exit code 3'
 assert_contains "$repo_root/docs/phase2-boundaries.md" 'exclude boot-image'
 assert_contains "$repo_root/docs/phase2-boundaries.md" 'Recommended next live-send shape'
+assert_contains "$repo_root/docs/phase2-boundaries.md" 'send_delivery_brief\.py'
+assert_contains "$repo_root/docs/phase2-boundaries.md" 'email transport is not implemented'
 assert_contains "$repo_root/system/nixos/harness.nix" 'hermes-phase2-delivery-brief-dry-run'
 assert_not_contains "$repo_root/system/nixos/harness.nix" 'systemd\.timers\.hermes-phase2-delivery-brief'
 assert_not_contains "$repo_root/system/nixos/flake.nix" 'generic-extlinux-compatible'

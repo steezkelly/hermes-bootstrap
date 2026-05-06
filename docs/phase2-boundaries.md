@@ -139,6 +139,8 @@ This lets the repo test the source-of-truth and no-secret/no-raw-journal contrac
 
 ## Recommended next live-send shape
 
+The repo now has a fail-closed delivery abstraction in `scripts/harness/send_delivery_brief.py`. Its only successful transport is `--transport dry-run`; `--transport email` exits non-zero with "email transport is not implemented" until the separate email discovery lane identifies a channel and credential plan.
+
 The first actual delivery implementation should still be systemd-owned, not Hermes-cron-owned, and should remain disabled-by-default until one manual send is validated. Recommended choices before writing code:
 
 - channel: email first if a local SMTP/Gmail path is already available; otherwise Telegram/Discord only with an explicit user-selected target
