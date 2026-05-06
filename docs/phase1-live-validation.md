@@ -125,7 +125,7 @@ sudo -u hermes-admin HERMES_HOME=/var/lib/hermes/.hermes hermes status
 
 Expected: command exits successfully.
 
-If it fails with `PermissionError` under `/var/lib/hermes/.hermes/cron/`, run the installed repair script or rebuild to a generation containing the declarative `UMask=0007` plus `ExecStartPost` state-permission hook in `system/nixos/flake.nix`.
+If it fails with `PermissionError` under `/var/lib/hermes/.hermes/cron/`, the installed Hermes Agent source is still enforcing upstream cron state permissions (`0700` directories / `0600` files). Re-run `scripts/repair-installed-hermes.sh --no-reboot` from a refreshed bootstrap checkout and rebuild/restart. The repair path patches staged `/etc/nixos/hermes-agent-src/cron/jobs.py` so Hermes cron uses group-readable appliance permissions (`2770` directories / `0660` files) instead of repeatedly undoing the NixOS-level `UMask=0007` and `ExecStartPost` repair.
 
 ## Exit criteria
 

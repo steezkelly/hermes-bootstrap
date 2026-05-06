@@ -304,6 +304,8 @@ stage_patched_hermes_agent_source() {
     sed -i "s#${old_hash}#${new_hash}#" "$src_dir/nix/tui.nix"
   fi
 
+  patch_hermes_agent_cron_group_state "$src_dir"
+
   if grep -q 'hermes-agent.url = "github:NousResearch/hermes-agent";' "$target_nixos_dir/flake.nix"; then
     sed -i 's#hermes-agent.url = "github:NousResearch/hermes-agent";#hermes-agent.url = "path:./hermes-agent-src";#' "$target_nixos_dir/flake.nix"
   fi
@@ -311,6 +313,50 @@ stage_patched_hermes_agent_source() {
   # The committed lock points at the upstream GitHub input. The target flake now
   # uses a local patched path input, so let nix create a matching lock file.
   rm -f "$target_nixos_dir/flake.lock"
+}
+
+patch_hermes_agent_cron_group_state() {
+  local src_dir="$1"
+  local jobs_py="$src_dir/cron/jobs.py"
+  [[ -f "$jobs_py" ]] || { warn "No Hermes cron/jobs.py found to patch for group-readable state."; return 0; }
+
+  python3 - "$jobs_py" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+
+dir_re = re.compile(r'def _secure_dir\(path: Path\):\n    """[^"\n]*"""\n    try:\n        os\.chmod\(path, 0o700\)\n    except \(OSError, NotImplementedError\):\n        pass  # Windows or other platforms where chmod is not supported\n', re.M)
+file_re = re.compile(r'def _secure_file\(path: Path\):\n    """[^"\n]*"""\n    try:\n        if path\.exists\(\):\n            os\.chmod\(path, 0o600\)\n    except \(OSError, NotImplementedError\):\n        pass\n', re.M)
+
+new_dir = '''def _secure_dir(path: Path):
+    """Set directory to Hermes-bootstrap group-readable state permissions."""
+    try:
+        os.chmod(path, 0o2770)
+    except (OSError, NotImplementedError):
+        pass  # Windows or other platforms where chmod is not supported
+'''
+new_file = '''def _secure_file(path: Path):
+    """Set file to Hermes-bootstrap group-readable state permissions."""
+    try:
+        if path.exists():
+            os.chmod(path, 0o660)
+    except (OSError, NotImplementedError):
+        pass
+'''
+
+new_text, dir_count = dir_re.subn(new_dir, text, count=1)
+new_text, file_count = file_re.subn(new_file, new_text, count=1)
+if dir_count == 0 and "0o2770" not in text:
+    raise SystemExit(f"could not patch _secure_dir in {path}")
+if file_count == 0 and "0o660" not in text:
+    raise SystemExit(f"could not patch _secure_file in {path}")
+if new_text != text:
+    path.write_text(new_text)
+PY
+  log "Patched Hermes cron state permissions for group-readable appliance operation"
 }
 
 container_mode_preflight() {

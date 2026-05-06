@@ -116,6 +116,50 @@ EOF
   mv "$config.tmp" "$config"
 }
 
+patch_hermes_agent_cron_group_state() {
+  local src_dir="$1"
+  local jobs_py="$src_dir/cron/jobs.py"
+  [[ -f "$jobs_py" ]] || { warn "No Hermes cron/jobs.py found to patch for group-readable state."; return 0; }
+
+  python3 - "$jobs_py" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+
+dir_re = re.compile(r'def _secure_dir\(path: Path\):\n    """[^"\n]*"""\n    try:\n        os\.chmod\(path, 0o700\)\n    except \(OSError, NotImplementedError\):\n        pass  # Windows or other platforms where chmod is not supported\n', re.M)
+file_re = re.compile(r'def _secure_file\(path: Path\):\n    """[^"\n]*"""\n    try:\n        if path\.exists\(\):\n            os\.chmod\(path, 0o600\)\n    except \(OSError, NotImplementedError\):\n        pass\n', re.M)
+
+new_dir = '''def _secure_dir(path: Path):
+    """Set directory to Hermes-bootstrap group-readable state permissions."""
+    try:
+        os.chmod(path, 0o2770)
+    except (OSError, NotImplementedError):
+        pass  # Windows or other platforms where chmod is not supported
+'''
+new_file = '''def _secure_file(path: Path):
+    """Set file to Hermes-bootstrap group-readable state permissions."""
+    try:
+        if path.exists():
+            os.chmod(path, 0o660)
+    except (OSError, NotImplementedError):
+        pass
+'''
+
+new_text, dir_count = dir_re.subn(new_dir, text, count=1)
+new_text, file_count = file_re.subn(new_file, new_text, count=1)
+if dir_count == 0 and "0o2770" not in text:
+    raise SystemExit(f"could not patch _secure_dir in {path}")
+if file_count == 0 and "0o660" not in text:
+    raise SystemExit(f"could not patch _secure_file in {path}")
+if new_text != text:
+    path.write_text(new_text)
+PY
+  log "Patched Hermes cron state permissions for group-readable appliance operation"
+}
+
 copy_nixos_sources_if_available() {
   local root="$1"
   local src=""
@@ -179,6 +223,8 @@ copy_nixos_sources_if_available() {
       rm -f "$target_nixos/flake.lock"
       log "Patched staged hermes-agent TUI npmDeps hash"
     fi
+    patch_hermes_agent_cron_group_state "$target_nixos/hermes-agent-src"
+    rm -f "$target_nixos/flake.lock"
   else
     warn "No /etc/nixos/hermes-agent-src found; leaving hermes-agent input as declared in refreshed flake."
   fi

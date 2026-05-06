@@ -222,7 +222,7 @@
               pkgs.networkmanager
               pkgs.wpa_supplicant
               pkgs.iw
-            ];
+            ] ++ import ./agent-extra-packages.nix { inherit pkgs; };
 
             services.openssh = {
               enable = true;
