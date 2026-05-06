@@ -28,6 +28,23 @@ error() { echo -e "${RED}[ERROR]${RESET} $*" >&2; exit 1; }
 
 need() { command -v "$1" &>/dev/null || error "Required: $1 (not found in PATH)"; }
 
+find_python() {
+  if command -v python3 >/dev/null 2>&1; then
+    command -v python3
+    return 0
+  fi
+
+  local candidate
+  for candidate in /run/current-system/sw/bin/python3 /nix/store/*python3*/bin/python3*; do
+    if [[ -x "$candidate" ]]; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  error "python3 not found in PATH or Nix store; cannot patch Hermes cron/jobs.py"
+}
+
 partition_path() {
   local disk="$1"
   local part_num="$2"
@@ -320,7 +337,9 @@ patch_hermes_agent_cron_group_state() {
   local jobs_py="$src_dir/cron/jobs.py"
   [[ -f "$jobs_py" ]] || { warn "No Hermes cron/jobs.py found to patch for group-readable state."; return 0; }
 
-  python3 - "$jobs_py" <<'PY'
+  local python_bin
+  python_bin=$(find_python)
+  "$python_bin" - "$jobs_py" <<'PY'
 from pathlib import Path
 import re
 import sys

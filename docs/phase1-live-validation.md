@@ -127,6 +127,24 @@ Expected: command exits successfully.
 
 If it fails with `PermissionError` under `/var/lib/hermes/.hermes/cron/`, the installed Hermes Agent source is still enforcing upstream cron state permissions (`0700` directories / `0600` files). Re-run `scripts/repair-installed-hermes.sh --no-reboot` from a refreshed bootstrap checkout and rebuild/restart. The repair path patches staged `/etc/nixos/hermes-agent-src/cron/jobs.py` so Hermes cron uses group-readable appliance permissions (`2770` directories / `0660` files) instead of repeatedly undoing the NixOS-level `UMask=0007` and `ExecStartPost` repair.
 
+Live-node note: installed appliances may not have a git checkout, `git`, or `python3` on the interactive admin `PATH`. It is acceptable to copy the current repair script into an existing work tree such as `/home/hermes-admin/hermes-bootstrap-work/`. Current repair/deploy scripts look for `python3` in `PATH`, then fall back to `/run/current-system/sw/bin/python3` or `/nix/store/*python3*/bin/python3*` before patching staged Hermes Agent source.
+
+When rebuilding manually, use the flake output declared by the installed `/etc/nixos/flake.nix`. The validated live node exposes `nixosConfigurations.hermes`, so the rebuild command was:
+
+```bash
+cd /etc/nixos && sudo nixos-rebuild switch --flake .#hermes
+```
+
+After repair + rebuild + `systemctl restart hermes-agent`, wait at least one Hermes cron tick before the final regression check:
+
+```bash
+sleep 70
+stat -c "%A %a %U:%G %n" /var/lib/hermes/.hermes/cron
+sudo -u hermes-admin HERMES_HOME=/var/lib/hermes/.hermes hermes status
+```
+
+Expected: cron remains `drwxrws---` / `2770`, and `hermes status` exits successfully.
+
 ## Exit criteria
 
 Phase 1 live validation passes when:
