@@ -143,6 +143,8 @@ The repo now has a fail-closed delivery abstraction in `scripts/harness/send_del
 
 NixOS also defines a disabled-by-default manual service named `hermes-phase2-delivery-brief-send`. It runs as `hermes-delivery`, has no timer, reads the local Phase 1 artifacts read-only, and currently invokes `send_delivery_brief.py --transport email`, which fails closed because no credential-backed email provider exists yet. This service is a safe placeholder for validating identity/sandbox wiring before adding Gmail API or SMTP code.
 
+Fail-closed manual-send live validation passed on the appliance at commit `4b00cfd`: `hermes-delivery` existed, the service had no timer, `InaccessiblePaths=-/var/lib/hermes/secrets` was present, and a manual start failed closed with `Result=exit-code`, `ExecMainCode=1`, `ExecMainStatus=2`, plus the journal text `email transport is not implemented. No message was sent.` Both `hermes-delivery` and `hermes-harness` remained unable to read `/var/lib/hermes/secrets/hermes.env`.
+
 The first actual delivery implementation should still be systemd-owned, not Hermes-cron-owned, and should remain disabled-by-default until one manual send is validated. Recommended choices before writing code:
 
 - channel: email first if a local SMTP/Gmail path is already available; otherwise Telegram/Discord only with an explicit user-selected target
@@ -150,6 +152,23 @@ The first actual delivery implementation should still be systemd-owned, not Herm
 - service identity: a separate least-privilege delivery user if credentials are required; do not grant `hermes-harness` secret access
 - payload: the dry-run renderer output exactly, not raw events or journals
 - live gate: one manual send succeeds once, then repeated sends are deduped/rate-limited before any timer is enabled
+
+## Credential/transport decision boundary
+
+Discovery found no ready email transport on the desktop or node:
+
+- no Himalaya config or binary usable for sending
+- no Google Workspace/Gmail OAuth token/client secret
+- no msmtp config
+- node has `python3`, `curl`, and `hermes`, but no mailer CLI
+
+The next code change should not add credentials directly to the existing Hermes secret env. Pick one of these explicit provider paths first:
+
+1. Gmail API on the node: add a small Python/curl sender plus a dedicated credential file or systemd credential containing only Gmail send scope material.
+2. SMTP on the node: add msmtp or equivalent plus a dedicated SMTP credential/config file.
+3. Hermes gateway bridge: treat it as a platform-message path, not email, and design an explicit node-to-gateway API/auth boundary.
+
+Until that choice is made, `hermes-phase2-delivery-brief-send.service` should keep failing closed and no timer should be added.
 
 ## Open design questions
 
