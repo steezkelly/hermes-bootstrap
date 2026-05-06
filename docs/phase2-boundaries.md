@@ -130,7 +130,22 @@ Properties:
 
 NixOS wires this renderer as a manual, disabled-by-default oneshot service named `hermes-phase2-delivery-brief-dry-run`. It has no timer and no `wantedBy`; operators can start it explicitly to inspect the would-be push payload in the service journal before any delivery channel exists.
 
+Live validation notes:
+
+- When copying a desktop checkout to the appliance work directory with rsync, exclude generated boot image contents: `rsync -a --delete --exclude .git --exclude boot-image ...`. The `boot-image/rootfs` tree can contain root-owned shadow/crontab/apk lock files that are not readable by the desktop user and are not needed for refreshing `/etc/nixos` plus harness scripts.
+- A completed successful oneshot normally becomes `inactive (dead)`. `systemctl status hermes-phase2-delivery-brief-dry-run.service` may therefore return shell exit code 3 even when the run succeeded. Verify the actual result with `systemctl show hermes-phase2-delivery-brief-dry-run.service -p ExecMainCode -p ExecMainStatus -p Result -p ActiveState --no-pager`; expected values are `Result=success`, `ExecMainCode=0`, `ExecMainStatus=0`, `ActiveState=inactive`.
+
 This lets the repo test the source-of-truth and no-secret/no-raw-journal contract while the live node finishes Phase 1 validation.
+
+## Recommended next live-send shape
+
+The first actual delivery implementation should still be systemd-owned, not Hermes-cron-owned, and should remain disabled-by-default until one manual send is validated. Recommended choices before writing code:
+
+- channel: email first if a local SMTP/Gmail path is already available; otherwise Telegram/Discord only with an explicit user-selected target
+- credentials: a separate Phase 2 delivery env file, not `/var/lib/hermes/secrets/hermes.env` wholesale
+- service identity: a separate least-privilege delivery user if credentials are required; do not grant `hermes-harness` secret access
+- payload: the dry-run renderer output exactly, not raw events or journals
+- live gate: one manual send succeeds once, then repeated sends are deduped/rate-limited before any timer is enabled
 
 ## Open design questions
 
