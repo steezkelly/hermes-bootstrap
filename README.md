@@ -92,8 +92,10 @@ hermes-bootstrap/
 │   └── public-audit.md
 ├── scripts/
 │   ├── backup-memories.py
+│   ├── create-nixos-findiso-usb.sh
 │   ├── deploy-hermes.sh
 │   ├── setup-hermes-agent.sh
+│   ├── update-nixos-usb-autodeploy.sh
 │   └── verify-bootstrap.sh
 ├── system/nixos/
 │   ├── agent-extra-packages.nix
@@ -101,7 +103,10 @@ hermes-bootstrap/
 │   ├── flake.nix
 │   ├── hardware-configuration.nix
 │   └── README.md
-└── tests/shell-syntax.sh
+└── tests/
+    ├── deployment-readiness.sh
+    ├── findiso-autodeploy-static.sh
+    └── shell-syntax.sh
 ```
 
 ## Prerequisites
@@ -133,6 +138,7 @@ cd hermes-bootstrap
 
 # Optional but recommended: validate scripts and flake/module evaluation.
 tests/shell-syntax.sh
+tests/findiso-autodeploy-static.sh
 tests/deployment-readiness.sh
 shellcheck --severity=error scripts/*.sh boot-image/*.sh boot-image/overlay/auto-deploy.sh boot-image/overlay/usr/local/bin/hw-detect boot-image/overlay/usr/local/bin/wifi-setup
 nix flake metadata ./system/nixos --accept-flake-config
@@ -171,7 +177,27 @@ sudo ./scripts/deploy-hermes.sh --partition /dev/nvme0n1
 sudo ./scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1 /path/to/hermes-bootstrap
 ```
 
-### Path B: experimental boot image
+### Path B: NixOS findiso USB autodeploy
+
+This is the current live-hardware path for a mostly plug-and-play install. It keeps the NixOS minimal ISO on a FAT32 USB as `nixos-minimal.iso`, boots it with GRUB `findiso=`, mounts the same USB at `/run/hermes-usb`, and runs `scripts/deploy-hermes.sh --auto-live` from `systemd.run`.
+
+```bash
+# Create a new FAT32 NIXOS-BOOT USB. Destructive: formats the selected disk.
+sudo ./scripts/create-nixos-findiso-usb.sh /dev/sdX /path/to/nixos-minimal-24.05-x86_64-linux.iso
+
+# Refresh an existing NIXOS-BOOT USB without repartitioning/reformatting.
+sudo ./scripts/update-nixos-usb-autodeploy.sh /dev/sdX
+```
+
+Live-deployment guardrails:
+
+- Intel N100/N150-class machines use `module_blacklist=i915` on the installer kernel line to avoid early i915 boot hangs.
+- `systemd.run` entries are separate commands: create `/run/hermes-usb`, mount `LABEL=NIXOS-BOOT`, then invoke `bash deploy-hermes.sh --auto-live` with an explicit PATH.
+- The GRUB `linux` line must use unwrapped `systemd.run="/run/... args"` tokens. Do not surround those tokens with single quotes and do not emit literal `\"`; both forms can make systemd treat the whole command string as the executable.
+- Do not set `HERMES_LIVE_TTY=1` in GRUB. The live script sets it only after attaching stdin/stdout/stderr to `/dev/tty1`, so SSID/password prompts can be typed without relying on `openvt`.
+- The USB update/create scripts self-check the generated command line with `systemd-run-generator` when available.
+
+### Path C: experimental boot image
 
 `boot-image/make-boot-image.sh` builds an Alpine-based bootstrap image intended to automate more of the process.
 

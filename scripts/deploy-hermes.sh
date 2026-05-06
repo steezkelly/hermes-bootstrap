@@ -55,6 +55,11 @@ check_root() {
 # ─── Helpers ──────────────────────────────────────────────────────────────
 confirm() {
   local prompt="${1:-Continue?}"
+  if [[ "${HERMES_AUTO_CONFIRM:-0}" == "1" ]]; then
+    warn "$prompt [auto-confirmed by HERMES_AUTO_CONFIRM=1]"
+    return 0
+  fi
+
   local retries=3
   while (( retries-- > 0 )); do
     read -rp "$prompt [y/N] " answer
@@ -135,99 +140,134 @@ usb_mount_retry() {
   return 1
 }
 
-# ─── WiFi Setup ──────────────────────────────────────────────────────────
-# Auto-detect WiFi interface and bring up network with guided fallback.
+# ─── Network / WiFi Setup ────────────────────────────────────────────────
+# Bring up network with NixOS-live-friendly diagnostics. wpa_supplicant
+# "successfully initialized" only means the daemon started; this verifies
+# association, DHCP/default route, DNS, and HTTPS reachability.
+net_ok() {
+  curl -fsSIL --connect-timeout 5 --max-time 12 https://github.com >/dev/null 2>&1 \
+    || ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1
+}
+
+run_dhcp() {
+  local iface="$1"
+  if command -v dhcpcd >/dev/null 2>&1; then
+    dhcpcd -4 -q "$iface" 2>/dev/null || dhcpcd -q "$iface" 2>/dev/null || true
+  fi
+
+  if ! ip route | grep -q '^default '; then
+    if command -v systemctl >/dev/null 2>&1; then
+      mkdir -p /etc/systemd/network
+      cat > "/etc/systemd/network/25-${iface}.network" << NETEOF
+[Match]
+Name=${iface}
+
+[Network]
+DHCP=yes
+DNS=1.1.1.1
+DNS=8.8.8.8
+NETEOF
+      systemctl restart systemd-networkd 2>/dev/null || true
+    fi
+  fi
+
+  sleep 5
+  if ! grep -q '^nameserver' /etc/resolv.conf 2>/dev/null; then
+    printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > /etc/resolv.conf 2>/dev/null || true
+  fi
+}
+
 wifi_setup() {
-  local max_wait="${1:-5}"
+  local max_wait="${1:-8}"
 
-  # Find wireless interface
-  local wlan_iface
-  wlan_iface=$(iw dev 2>/dev/null | grep Interface | awk '{print $2}' | head -1 || true)
+  if net_ok; then
+    log "Network already OK — GitHub reachable."
+    return 0
+  fi
 
-  # Try ethernet DHCP first
+  # Try any non-loopback wired/up interface first. QEMU/NixOS commonly uses
+  # enp0s4; physical machines vary (enp*, eno*, eth*).
   local eth_iface
-  eth_iface=$(ip -br link show 2>/dev/null | grep -oE 'eth[0-9]+|enp[0-9]+s[0-9]+' | head -1 || true)
+  eth_iface=$(ip -br link show 2>/dev/null | awk '$1 != "lo" {print $1; exit}' || true)
   if [[ -n "$eth_iface" ]]; then
-    log "Trying ethernet ($eth_iface)..."
-    dhcpcd "$eth_iface" 2>/dev/null || dhcpcd -q "$eth_iface" 2>/dev/null || true
-    sleep 2
-    if ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
-      log "Ethernet OK — internet reachable."
+    log "Trying network interface ($eth_iface)..."
+    ip link set "$eth_iface" up 2>/dev/null || true
+    run_dhcp "$eth_iface"
+    if net_ok; then
+      log "Network OK on $eth_iface — GitHub reachable."
       return 0
     fi
   fi
 
-  # No ethernet — must use WiFi
+  local wlan_iface
+  wlan_iface=$(iw dev 2>/dev/null | awk '/Interface/ {print $2; exit}' || true)
   if [[ -z "$wlan_iface" ]]; then
-    # Try to bring it up anyway (some adapters show as wlan by default)
-    ip link set wlan0 up 2>/dev/null || true
-    wlan_iface=$(iw dev 2>/dev/null | grep Interface | awk '{print $2}' | head -1 || true)
-  fi
-
-  if [[ -z "$wlan_iface" ]]; then
-    warn "No wireless interface found. Skipping WiFi."
+    warn "No wireless interface found and internet is not reachable."
+    ip -br addr show 2>/dev/null || true
+    ip route 2>/dev/null || true
     return 1
   fi
 
   log "Wireless interface: $wlan_iface"
+  ip link set "$wlan_iface" up 2>/dev/null || true
 
-  # Try saved wpa_supplicant.conf
-  if [[ -f /etc/wpa_supplicant.conf ]] && grep -q 'ssid=' /etc/wpa_supplicant.conf 2>/dev/null; then
-    log "Trying saved WiFi config..."
-    wpa_supplicant -B -i "$wlan_iface" -c /etc/wpa_supplicant.conf 2>/dev/null && {
-      dhcpcd -q "$wlan_iface" 2>/dev/null || true
-      sleep "$max_wait"
-      if ping -c 1 -W 3 8.8.8.8 &>/dev/null; then
-        log "WiFi OK — internet reachable."
-        return 0
-      fi
-    }
-  fi
-
-  # Guided setup
   echo ""
-  warn "No saved WiFi config. Running guided setup..."
-  echo ""
+  warn "WiFi setup required."
   echo "Available networks on $wlan_iface:"
   iw dev "$wlan_iface" scan 2>/dev/null | grep -E 'SSID:|signal:' | paste - - 2>/dev/null || echo "  (scan failed)"
   echo ""
 
   local ssid=""
   local password=""
-
   printf 'SSID: '
   read -r ssid
-
-  if [[ -z "$ssid" ]]; then
-    warn "No SSID entered. Skipping WiFi."
-    return 1
-  fi
+  [[ -n "$ssid" ]] || { warn "No SSID entered. Skipping WiFi."; return 1; }
 
   printf 'Password (leave blank for open network): '
   read -r password
-
   if [[ -n "$password" ]]; then
     wpa_passphrase "$ssid" "$password" > /etc/wpa_supplicant.conf
   else
     printf 'network={\n  ssid="%s"\n  key_mgmt=NONE\n}\n' "$ssid" > /etc/wpa_supplicant.conf
   fi
+  chmod 600 /etc/wpa_supplicant.conf
 
   log "Starting wpa_supplicant on $wlan_iface..."
-  wpa_supplicant -B -i "$wlan_iface" -c /etc/wpa_supplicant.conf 2>/dev/null || {
+  pkill wpa_supplicant 2>/dev/null || true
+  rm -rf /run/wpa_supplicant
+  mkdir -p /run/wpa_supplicant
+  wpa_supplicant -B -i "$wlan_iface" -c /etc/wpa_supplicant.conf -C /run/wpa_supplicant 2>/dev/null || {
     warn "wpa_supplicant failed. Check dmesg for driver issues."
     return 1
   }
 
-  dhcpcd -q "$wlan_iface" 2>/dev/null || true
-  sleep "$max_wait"
-
-  if ping -c 1 -W 5 8.8.8.8 &>/dev/null; then
-    log "WiFi OK — internet reachable."
-    return 0
-  else
-    warn "WiFi connected but internet unreachable. Check router settings."
+  local state=""
+  for _ in $(seq 1 "$max_wait"); do
+    state=$(wpa_cli -p /run/wpa_supplicant -i "$wlan_iface" status 2>/dev/null | awk -F= '/^wpa_state=/ {print $2}' || true)
+    [[ "$state" == "COMPLETED" ]] && break
+    sleep 1
+  done
+  if [[ "$state" != "COMPLETED" ]]; then
+    warn "WiFi did not associate; wpa_state=${state:-unknown}"
+    wpa_cli -p /run/wpa_supplicant -i "$wlan_iface" status 2>/dev/null || true
     return 1
   fi
+  log "WiFi associated with router. Requesting DHCP..."
+
+  run_dhcp "$wlan_iface"
+
+  echo "Network diagnostics:"
+  ip -br addr show "$wlan_iface" 2>/dev/null || true
+  ip route 2>/dev/null || true
+  cat /etc/resolv.conf 2>/dev/null || true
+
+  if net_ok; then
+    log "WiFi OK — GitHub reachable."
+    return 0
+  fi
+
+  warn "WiFi associated, but internet/DNS check still failed."
+  return 1
 }
 
 nix_option_string() {
@@ -240,6 +280,37 @@ nix_option_bool_true() {
   local file="$1"
   local key="$2"
   grep -Eq "^[[:space:]]*${key}[[:space:]]*=[[:space:]]*true;" "$file"
+}
+
+stage_patched_hermes_agent_source() {
+  local target_nixos_dir="$1"
+  local rev="d12f59aa5377635f7f4ad680cc349bf3e770a5d8"
+  local old_hash="sha256-a/HGI9OgVcTnZrMXA7xFMGnFoVxyHe95fulVz+WNYB0="
+  local new_hash="sha256-MLcLhjTF6dgdvNBtJWzo8Nh19eNh/ZitD2b07nm61Tc="
+  local src_dir="$target_nixos_dir/hermes-agent-src"
+
+  if [[ -f "$src_dir/flake.nix" ]]; then
+    log "Using existing hermes-agent source at $src_dir"
+  else
+    log "Staging hermes-agent source at locked rev $rev..."
+    rm -rf "$src_dir"
+    mkdir -p "$src_dir"
+    curl -fsSL "https://github.com/NousResearch/hermes-agent/archive/${rev}.tar.gz" \
+      | tar -xz --strip-components=1 -C "$src_dir"
+  fi
+
+  if [[ -f "$src_dir/nix/tui.nix" ]] && grep -q "$old_hash" "$src_dir/nix/tui.nix"; then
+    warn "Patching hermes-agent TUI npmDeps hash for live install reproducibility."
+    sed -i "s#${old_hash}#${new_hash}#" "$src_dir/nix/tui.nix"
+  fi
+
+  if grep -q 'hermes-agent.url = "github:NousResearch/hermes-agent";' "$target_nixos_dir/flake.nix"; then
+    sed -i 's#hermes-agent.url = "github:NousResearch/hermes-agent";#hermes-agent.url = "path:./hermes-agent-src";#' "$target_nixos_dir/flake.nix"
+  fi
+
+  # The committed lock points at the upstream GitHub input. The target flake now
+  # uses a local patched path input, so let nix create a matching lock file.
+  rm -f "$target_nixos_dir/flake.lock"
 }
 
 container_mode_preflight() {
@@ -508,32 +579,26 @@ bootstrap_nixos() {
   mkdir -p /mnt/boot/efi
   mount "$efi_dev" /mnt/boot/efi
 
-  # ── v2: Find hermes-bootstrap on any USB partition (with retry) ─────────
-  log "Looking for hermes-bootstrap on mounted devices..."
+  # ── v2: Find hermes-bootstrap on the stable USB mount ───────────────────
+  # auto_live passes /run/hermes-usb/hermes-bootstrap here before /mnt is used
+  # for the target root. Prefer that stable source and avoid probing random
+  # target/internal partitions after partitioning.
+  log "Looking for hermes-bootstrap source..."
   local found_src=""
-  for mp in /mnt/boot /mnt/boot/ventoy /mnt; do
-    if [[ -d "$mp/hermes-bootstrap" ]]; then
-      found_src="$mp/hermes-bootstrap"
-      log "Found at: $found_src"
-      break
+  if [[ -d "$bootstrap_src" ]]; then
+    found_src="$bootstrap_src"
+    log "Using source passed by autodeploy: $found_src"
+  elif [[ -d /run/hermes-usb/hermes-bootstrap ]]; then
+    found_src="/run/hermes-usb/hermes-bootstrap"
+    log "Found on stable USB mount: $found_src"
+  else
+    warn "hermes-bootstrap not found on stable mount. Trying NIXOS-BOOT label once..."
+    mkdir -p /run/hermes-usb
+    mountpoint -q /run/hermes-usb || mount LABEL=NIXOS-BOOT /run/hermes-usb 2>/dev/null || true
+    if [[ -d /run/hermes-usb/hermes-bootstrap ]]; then
+      found_src="/run/hermes-usb/hermes-bootstrap"
+      log "Found after mounting NIXOS-BOOT: $found_src"
     fi
-  done
-
-  if [[ -z "$found_src" ]]; then
-    # Try to mount USB
-    warn "hermes-bootstrap not found. Looking for USB..."
-    for dev in /dev/sd*1 /dev/nvme*p1 /dev/sd*2 /dev/nvme*p2; do
-      [[ -b "$dev" ]] || continue
-      mkdir -p /mnt/usb-bootstrap
-      if usb_mount_retry "$dev" /mnt/usb-bootstrap; then
-        if [[ -d /mnt/usb-bootstrap/hermes-bootstrap ]]; then
-          found_src="/mnt/usb-bootstrap/hermes-bootstrap"
-          log "Found on USB at $dev"
-          break
-        fi
-        umount /mnt/usb-bootstrap 2>/dev/null || true
-      fi
-    done
   fi
 
   bootstrap_src="${found_src:-${bootstrap_src}}"
@@ -551,6 +616,29 @@ bootstrap_nixos() {
   # avoids carrying CI/template assumptions such as qemu-guest into bare metal.
   log "Generating hardware config..."
   nixos-generate-config --root /mnt --force
+
+  local efi_uuid root_uuid
+  efi_uuid=$(blkid -o value -s UUID "$efi_dev" 2>/dev/null || true)
+  root_uuid=$(blkid -o value -s UUID "$root_dev" 2>/dev/null || true)
+  [[ -n "$efi_uuid" ]] || error "Could not read UUID for target EFI partition $efi_dev"
+  [[ -n "$root_uuid" ]] || error "Could not read UUID for target root partition $root_dev"
+  log "Target filesystem UUIDs: root=$root_uuid efi=$efi_uuid"
+  cat > /mnt/etc/nixos/hermes-target-filesystems.nix << FSEOF
+# Generated by hermes-bootstrap during live install.
+# These overrides pin / and /boot/efi to the internal target partitions that
+# were just partitioned and mounted, avoiding accidental references to the USB
+# installer media in nixos-generate-config output.
+{ lib, ... }:
+{
+  fileSystems."/".device = lib.mkForce "/dev/disk/by-uuid/$root_uuid";
+  fileSystems."/".fsType = lib.mkForce "ext4";
+  fileSystems."/".options = lib.mkForce [ "defaults" "noatime" ];
+
+  fileSystems."/boot/efi".device = lib.mkForce "/dev/disk/by-uuid/$efi_uuid";
+  fileSystems."/boot/efi".fsType = lib.mkForce "vfat";
+  fileSystems."/boot/efi".options = lib.mkForce [ "defaults" ];
+}
+FSEOF
 
   if [[ ! -s /mnt/etc/nixos/hardware-configuration.nix ]]; then
     warn "nixos-generate-config did not produce hardware-configuration.nix; writing minimal fallback"
@@ -582,9 +670,16 @@ HWEOF
   cp /mnt/hermes-bootstrap/system/nixos/flake.nix /mnt/etc/nixos/flake.nix
   cp /mnt/hermes-bootstrap/system/nixos/deployment-options.nix /mnt/etc/nixos/deployment-options.nix
   cp /mnt/hermes-bootstrap/system/nixos/agent-extra-packages.nix /mnt/etc/nixos/agent-extra-packages.nix
+  cp /mnt/hermes-bootstrap/system/nixos/harness.nix /mnt/etc/nixos/harness.nix
+  rm -rf /mnt/etc/nixos/harness-scripts
+  cp -r /mnt/hermes-bootstrap/scripts/harness /mnt/etc/nixos/harness-scripts
+  # Keep the generated hermes-target-filesystems.nix from above; the checked-in
+  # copy is an empty CI/default placeholder and must not overwrite target UUIDs.
   if [[ -f /mnt/hermes-bootstrap/system/nixos/flake.lock ]]; then
     cp /mnt/hermes-bootstrap/system/nixos/flake.lock /mnt/etc/nixos/flake.lock
   fi
+
+  stage_patched_hermes_agent_source /mnt/etc/nixos
 
   container_mode_preflight \
     /mnt/etc/nixos/deployment-options.nix \
@@ -621,23 +716,39 @@ SECRETS_EOF
   # Wire secrets into the flake's environmentFiles
   # (The flake references /var/lib/hermes/secrets/hermes.env via environmentFiles)
 
-  # Run the reliable flake install path from inside the target root.
-  log "Installing NixOS via nixos-enter + nixos-rebuild (this takes 10-30 minutes)..."
-  nixos-enter --root /mnt -- /bin/sh -c '
-    cd /etc/nixos &&
-    nixos-rebuild switch \
-      --flake .#hermes \
-      --option sandbox false \
-      --option accept-flake-config true
-  '
+  # Install the system to the target root. Earlier experiments avoided
+  # `nixos-install --flake` because broken intermediate flake states produced
+  # misleading eval errors from the live USB. The target is not yet a NixOS
+  # installation, so `nixos-enter --root /mnt` cannot be the first install step.
+  # Build/install the now-validated flake directly, with sandbox disabled for
+  # live-USB compatibility.
+  log "Installing NixOS via nixos-install --flake (this takes 10-30 minutes)..."
+  nixos-install \
+    --root /mnt \
+    --flake /mnt/etc/nixos#hermes \
+    --no-root-passwd \
+    --impure \
+    --option sandbox false \
+    --option accept-flake-config true
 
   # ── Post-install: init git repo for state tracking ───────────────────────
-  log "Initializing git state tracking..."
-  git -C /mnt/var/lib/hermes init
-  git -C /mnt/var/lib/hermes config user.email "hermes@localhost"
-  git -C /mnt/var/lib/hermes config user.name "Hermes OS"
-  # Exclude secrets, volatile files, and db WAL/shm from git
-  cat > /mnt/var/lib/hermes/.git/info/exclude << 'GITEXCL_EOF'
+  # The minimal NixOS installer environment may not include git. Treat state
+  # tracking as optional post-install setup so a successful nixos-install still
+  # proceeds to the reboot path.
+  local git_cmd=""
+  if command -v git >/dev/null 2>&1; then
+    git_cmd="git"
+  elif [[ -x /mnt/nix/var/nix/profiles/system/sw/bin/git ]]; then
+    git_cmd="/mnt/nix/var/nix/profiles/system/sw/bin/git"
+  fi
+
+  if [[ -n "$git_cmd" ]]; then
+    log "Initializing git state tracking..."
+    "$git_cmd" -C /mnt/var/lib/hermes init
+    "$git_cmd" -C /mnt/var/lib/hermes config user.email "hermes@localhost"
+    "$git_cmd" -C /mnt/var/lib/hermes config user.name "Hermes OS"
+    # Exclude secrets, volatile files, and db WAL/shm from git
+    cat > /mnt/var/lib/hermes/.git/info/exclude << 'GITEXCL_EOF'
 # Secrets — never commit these
 secrets/
 *.env
@@ -648,6 +759,9 @@ core.*
 *.sock
 .hermes/*.pid
 GITEXCL_EOF
+  else
+    warn "git not found in live or installed system profile — skipping optional /var/lib/hermes state repo initialization"
+  fi
 
   log "${GREEN}NixOS installed!${RESET}"
   echo
@@ -656,6 +770,137 @@ GITEXCL_EOF
   echo "  2. Unmount and reboot: sudo umount -R /mnt && sudo reboot"
   echo "  3. Remove USB stick after reboot"
   echo
+}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# LIVE USB AUTODEPLOY
+# ═══════════════════════════════════════════════════════════════════════════
+autodeploy_log_setup() {
+  exec > >(tee -a /tmp/hermes-bootstrap-autodeploy.log) 2>&1
+}
+
+detect_internal_disk() {
+  local candidates=()
+  local dev type rm size label
+
+  # Use lsblk pairs so empty columns do not shift fields.
+  while IFS= read -r line; do
+    dev=$(sed -n 's/.*PATH="\([^"]*\)".*/\1/p' <<< "$line")
+    type=$(sed -n 's/.*TYPE="\([^"]*\)".*/\1/p' <<< "$line")
+    rm=$(sed -n 's/.*RM="\([^"]*\)".*/\1/p' <<< "$line")
+    size=$(sed -n 's/.*SIZE="\([^"]*\)".*/\1/p' <<< "$line")
+    label=$(sed -n 's/.*LABEL="\([^"]*\)".*/\1/p' <<< "$line")
+    size="${size:-0}"
+    [[ "$type" == "disk" ]] || continue
+    [[ "$rm" == "0" ]] || continue
+    [[ "$label" == "NIXOS-BOOT" ]] && continue
+    # Exclude the boot USB even in VMs where the parent disk may appear non-removable
+    # and only the child partition carries LABEL=NIXOS-BOOT.
+    if lsblk -nr -o LABEL "$dev" 2>/dev/null | grep -qx 'NIXOS-BOOT'; then
+      continue
+    fi
+    # Ignore tiny/odd virtual media. Physical N150 target should expose one NVMe/eMMC/SATA disk.
+    if (( size < 20 * 1024 * 1024 * 1024 )); then
+      continue
+    fi
+    candidates+=("$dev")
+  done < <(lsblk -bdn -P -o PATH,TYPE,RM,SIZE,LABEL 2>/dev/null)
+
+  if (( ${#candidates[@]} == 1 )); then
+    printf '%s\n' "${candidates[0]}"
+    return 0
+  fi
+
+  echo ""
+  warn "Could not safely auto-select exactly one internal target disk."
+  echo "Detected block devices:"
+  lsblk -o NAME,PATH,SIZE,TYPE,TRAN,RM,MODEL,LABEL,MOUNTPOINTS
+  echo ""
+  if (( ${#candidates[@]} > 1 )); then
+    warn "Multiple possible internal disks: ${candidates[*]}"
+  else
+    warn "No suitable non-removable internal disk >=20G found."
+  fi
+  printf 'Type the internal disk path to ERASE, or blank to abort: '
+  read -r dev
+  [[ -n "$dev" && -b "$dev" ]] || error "No valid target disk selected."
+  printf '%s\n' "$dev"
+}
+
+ensure_usb_bootstrap_mounted() {
+  # Do not mount under /mnt: bootstrap_nixos mounts the target root at /mnt,
+  # which would hide the USB mount and make the source disappear mid-run.
+  local usb_mp="/run/hermes-usb"
+
+  if [[ -d "$usb_mp/hermes-bootstrap" ]]; then
+    printf '%s\n' "$usb_mp/hermes-bootstrap"
+    return 0
+  fi
+
+  mkdir -p "$usb_mp"
+  if ! mountpoint -q "$usb_mp"; then
+    mount LABEL=NIXOS-BOOT "$usb_mp" 2>/dev/null \
+      || mount /dev/disk/by-label/NIXOS-BOOT "$usb_mp" 2>/dev/null \
+      || true
+  fi
+
+  [[ -d "$usb_mp/hermes-bootstrap" ]] \
+    || error "Cannot find $usb_mp/hermes-bootstrap on USB label NIXOS-BOOT"
+  printf '%s\n' "$usb_mp/hermes-bootstrap"
+}
+
+wait_for_hermes_after_reboot_note() {
+  cat <<'NOTE'
+
+[HERMES] Install finished. The installed system should now boot from the internal disk.
+[HERMES] If firmware returns to the USB menu after reboot, choose the internal disk in BIOS/boot menu.
+[HERMES] On the installed system, hermes-agent is enabled as a systemd service and should start automatically.
+
+NOTE
+}
+
+auto_live() {
+  check_root
+
+  # systemd.run services do not provide an interactive stdin. Attach this
+  # process directly to tty1 so WiFi SSID/password prompts are typeable on the
+  # physical console. Avoid openvt here: `openvt -w` can finish the child script
+  # successfully but then return nonzero with "Couldn't deallocate console N",
+  # which makes kernel-command-line.service fail at the end of an otherwise
+  # successful deployment.
+  if [[ "${HERMES_LIVE_TTY:-0}" != "1" ]] && [[ ! -t 0 ]] && [[ -e /dev/tty1 ]]; then
+    export HERMES_LIVE_TTY=1
+    chvt 1 2>/dev/null || true
+    exec </dev/tty1 >/dev/tty1 2>&1
+  fi
+
+  autodeploy_log_setup
+  log "${BOLD}Hermes Bootstrap Autodeploy${RESET}"
+  log "Log: /tmp/hermes-bootstrap-autodeploy.log"
+
+  local bootstrap_src target_disk
+  bootstrap_src=$(ensure_usb_bootstrap_mounted)
+  target_disk=$(detect_internal_disk)
+
+  echo ""
+  warn "Autodeploy target: $target_disk"
+  warn "This will erase the selected internal disk."
+  warn "Single internal disk was auto-selected; continuing without another prompt."
+
+  export HERMES_AUTO_CONFIRM=1
+  partition_internal "$target_disk"
+  bootstrap_nixos "$target_disk" "$bootstrap_src"
+
+  log "Setting a locked root password; interactive root password setup is skipped for appliance-style boot."
+  chroot /mnt passwd -l root >/dev/null 2>&1 || true
+
+  wait_for_hermes_after_reboot_note
+  sync
+  log "Rebooting in 10 seconds. Remove the USB if firmware keeps preferring it."
+  sleep 10
+  umount -R /mnt 2>/dev/null || true
+  reboot
 }
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -669,6 +914,7 @@ ${BOLD}USAGE:${RESET}
   $0 --prepare-usb /dev/sdX        Prepare bootable USB (FAT32, copy files)
   $0 --partition /dev/nvme0n1      Partition internal SSD (interactive)
   $0 --bootstrap /dev/nvme0n1      Bootstrap NixOS (run from NixOS installer)
+  $0 --auto-live                  Auto-detect disk and deploy from live USB
   $0 --all /dev/sdX /dev/nvme0n1  Full pipeline (prepare + partition + install)
 
 ${BOLD}V2 FLOW:${RESET}
@@ -690,9 +936,8 @@ ${BOLD}EXAMPLES:${RESET}
   wget https://channels.nixos.org/nixos-24.05/latest-nixos-minimal-x86_64-linux.iso
   sudo ./scripts/deploy-hermes.sh --prepare-usb /dev/sdb
 
-  # On target machine (NixOS installer TTY):
-  sudo ./hermes-bootstrap/scripts/deploy-hermes.sh --partition /dev/nvme0n1
-  sudo ./hermes-bootstrap/scripts/deploy-hermes.sh --bootstrap /dev/nvme0n1
+  # On target machine: choose "Hermes Bootstrap" from the USB menu.
+  # It auto-runs until WiFi credentials or an unsafe disk choice require input.
 
 ${BOLD}V1 → V2 CHANGES:${RESET}
   - Removed Ventoy dependency (Ventoy timeout was causing gray screens)
@@ -745,6 +990,8 @@ main() {
         else
           arg2=""; shift 2
         fi ;;
+      --auto-live)
+        cmd="auto_live"; shift ;;
       --all)
         cmd="all"; arg1="$2"; arg2="$3"; shift 3 ;;
       --verify)
@@ -766,6 +1013,8 @@ main() {
     bootstrap_nixos)
       [[ -n "$arg1" ]] || { usage; exit 1; }
       bootstrap_nixos "$arg1" "${arg2:-}" ;;
+    auto_live)
+      auto_live ;;
     all)
       [[ -n "$arg1" && -n "$arg2" ]] || { usage; exit 1; }
       prepare_usb "$arg1"

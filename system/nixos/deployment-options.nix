@@ -10,6 +10,15 @@
   # Interactive administrator account.
   adminUser = "hermes-admin";
   adminDescription = "Hermes administrator";
+  # Optional first-login password for local, private bootstrap forks. The public
+  # default is null: console autologin and SSH keys provide first access without
+  # committing a reusable password. If you set this, change it after first boot.
+  adminInitialPassword = null;
+  adminAuthorizedKeys = [
+    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILO6bnx21ITOdoJ6qZAa0kpM3BUmQb43BnvnLUdgFO1C steve@desktop"
+  ];
+  consoleAutologin = true;
+  passwordlessSudo = true;
 
   # Hermes Agent runtime user/state.
   agentUser = "hermes";
@@ -31,7 +40,7 @@
 
   # LLM defaults. Credentials live in secretsEnvFile, not in this file.
   provider = "minimax";
-  model = "minimax/minimax-m2.7";
+  model = "minimax-m2.7";
 
   # Local gateway. Keep this bound to localhost unless you add TLS/auth/reverse proxy hardening.
   gatewayHost = "127.0.0.1";

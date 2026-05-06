@@ -4,8 +4,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 scripts=(
+  "$repo_root/scripts/create-nixos-findiso-usb.sh"
   "$repo_root/scripts/deploy-hermes.sh"
+  "$repo_root/scripts/repair-installed-hermes.sh"
   "$repo_root/scripts/setup-hermes-agent.sh"
+  "$repo_root/scripts/update-nixos-usb-autodeploy.sh"
   "$repo_root/scripts/verify-bootstrap.sh"
   "$repo_root/boot-image/make-boot-image.sh"
   "$repo_root/boot-image/overlay/auto-deploy.sh"
@@ -16,6 +19,8 @@ scripts=(
   "$repo_root/tests/boot-image-static.sh"
   "$repo_root/tests/container-mode-static.sh"
   "$repo_root/tests/container-mode-preflight-unit.sh"
+  "$repo_root/tests/findiso-autodeploy-static.sh"
+  "$repo_root/tests/harness_phase1_static.sh"
 )
 
 for script in "${scripts[@]}"; do

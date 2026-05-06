@@ -381,6 +381,10 @@ fi
 cp /mnt/hermes-bootstrap/system/nixos/flake.nix /mnt/etc/nixos/flake.nix
 cp /mnt/hermes-bootstrap/system/nixos/deployment-options.nix /mnt/etc/nixos/deployment-options.nix
 cp /mnt/hermes-bootstrap/system/nixos/agent-extra-packages.nix /mnt/etc/nixos/agent-extra-packages.nix
+cp /mnt/hermes-bootstrap/system/nixos/hermes-target-filesystems.nix /mnt/etc/nixos/hermes-target-filesystems.nix
+cp /mnt/hermes-bootstrap/system/nixos/harness.nix /mnt/etc/nixos/harness.nix
+rm -rf /mnt/etc/nixos/harness-scripts
+cp -r /mnt/hermes-bootstrap/scripts/harness /mnt/etc/nixos/harness-scripts
 if [[ -f /mnt/hermes-bootstrap/system/nixos/flake.lock ]]; then
   cp /mnt/hermes-bootstrap/system/nixos/flake.lock /mnt/etc/nixos/flake.lock
 fi

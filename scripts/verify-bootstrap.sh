@@ -48,7 +48,7 @@ echo "════════════════════════�
 section "System"
 
 run "test -f /etc/nixos/flake.nix" "flake.nix exists"
-run "test -d /etc/nixos/hermes-agent" "hermes-agent source present"
+run "test -d /etc/nixos/hermes-agent-src -o -f /run/current-system/sw/bin/hermes" "hermes-agent available"
 run "test -d /var/lib/hermes" "hermes state directory exists"
 run "test -d /var/lib/hermes/workspace" "workspace directory exists"
 run "test -f /var/lib/hermes/.hermes/config.yaml" "config.yaml generated"
@@ -63,7 +63,7 @@ run "stat -c %U /var/lib/hermes | grep -q hermes" "hermes owns state directory"
 
 section "NixOS Module"
 
-run "hermes --version 2>/dev/null || hermes-agent --version 2>/dev/null" "hermes CLI available"
+run "command -v hermes && hermes --version 2>/dev/null" "hermes CLI available"
 run "test -f /run/current-system/sw/bin/hermes" "hermes in system profile"
 
 section "Systemd Service"
@@ -71,6 +71,17 @@ section "Systemd Service"
 run "systemctl is-active hermes-agent &>/dev/null" "hermes-agent.service is active"
 run "systemctl is-enabled hermes-agent &>/dev/null" "hermes-agent.service is enabled"
 run "! systemctl is-failed hermes-agent &>/dev/null" "hermes-agent.service not failed"
+
+section "Phase 1 Harness"
+
+run "id hermes-harness &>/dev/null" "hermes-harness user exists"
+run "systemctl is-enabled hermes-node-health-watchdog.timer &>/dev/null" "harness watchdog timer enabled"
+run "systemctl is-enabled hermes-daily-local-brief.timer &>/dev/null" "harness daily brief timer enabled"
+run "systemctl is-active hermes-node-health-watchdog.timer &>/dev/null" "harness watchdog timer active"
+run "systemctl is-active hermes-daily-local-brief.timer &>/dev/null" "harness daily brief timer active"
+run "test -d /var/lib/hermes/harness" "harness state directory exists"
+run "test -d /var/lib/hermes/events" "harness events directory exists"
+run "test -d /var/lib/hermes/reports" "harness reports directory exists"
 
 section "Network"
 

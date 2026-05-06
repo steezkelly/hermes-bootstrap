@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""Phase 1 harness behavior tests.
+
+These tests intentionally exercise the scripts as importable Python modules so
+sensor behavior can stay deterministic without requiring a live NixOS system.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+HARNESS_DIR = REPO_ROOT / "scripts" / "harness"
+
+
+def load_module(name: str) -> Any:
+    path = HARNESS_DIR / f"{name}.py"
+    spec = importlib.util.spec_from_file_location(name, path)
+    assert spec is not None and spec.loader is not None, path
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def test_redaction_masks_token_like_values() -> None:
+    common = load_module("harness_common")
+
+    text = (
+        "OPENAI_API_KEY=sk-abcdefghijklmnopqrstuvwxyz0123456789 "
+        "token=secret-value "
+        "Authorization: Bearer bearer-secret-value"
+    )
+    redacted = common.redact(text)
+
+    assert "sk-abcdefghijklmnopqrstuvwxyz0123456789" not in redacted
+    assert "secret-value" not in redacted
+    assert "bearer-secret-value" not in redacted
+    assert "OPENAI_API_KEY=[REDACTED]" in redacted
+    assert "token=[REDACTED]" in redacted
+    assert "Authorization: Bearer [REDACTED]" in redacted
+
+
+def test_atomic_writes_create_group_readable_files(tmp_path: Path) -> None:
+    common = load_module("harness_common")
+
+    json_path = tmp_path / "state.json"
+    text_path = tmp_path / "report.md"
+    common.atomic_write_json(json_path, {"ok": True})
+    common.write_text_atomic(text_path, "hello")
+
+    assert json_path.stat().st_mode & 0o660 == 0o660
+    assert text_path.stat().st_mode & 0o660 == 0o660
+
+
+def test_watchdog_writes_latest_snapshot_and_no_event_for_ok_run(tmp_path: Path) -> None:
+    watchdog = load_module("node_health_watchdog")
+
+    results = [
+        {"sensor": "system", "status": "ok", "checks": []},
+        {"sensor": "network", "status": "ok", "checks": []},
+        {"sensor": "hermes", "status": "ok", "checks": []},
+        {"sensor": "release_policy", "status": "ok", "checks": []},
+    ]
+    exit_code = watchdog.run_once(tmp_path, sensor_fns=[lambda r=r: r for r in results], now="2026-05-06T06:00:00Z")
+
+    assert exit_code == 0
+    latest = json.loads((tmp_path / "harness" / "latest-sensors.json").read_text())
+    assert latest["overall_status"] == "ok"
+    assert [s["sensor"] for s in latest["sensors"]] == ["system", "network", "hermes", "release_policy"]
+    assert read_jsonl(tmp_path / "events" / "events.jsonl") == []
+
+
+def test_watchdog_dedupes_repeated_warning_until_rate_window(tmp_path: Path) -> None:
+    watchdog = load_module("node_health_watchdog")
+
+    warning = {
+        "sensor": "release_policy",
+        "status": "warning",
+        "checks": [{"id": "release.nixos24_05.unsupported", "status": "warning", "summary": "NixOS 24.05 unsupported"}],
+    }
+
+    assert watchdog.run_once(tmp_path, sensor_fns=[lambda: warning], now="2026-05-06T06:00:00Z") == 0
+    assert watchdog.run_once(tmp_path, sensor_fns=[lambda: warning], now="2026-05-06T06:30:00Z") == 0
+    assert watchdog.run_once(tmp_path, sensor_fns=[lambda: warning], now="2026-05-06T08:01:00Z") == 0
+
+    events = read_jsonl(tmp_path / "events" / "events.jsonl")
+    assert [e["id"] for e in events] == ["release.nixos24_05.unsupported", "release.nixos24_05.unsupported"]
+    assert events[0]["reason"] == "first_seen"
+    assert events[1]["reason"] == "rate_limit_expired"
+
+
+def test_watchdog_emits_recovery_after_warning(tmp_path: Path) -> None:
+    watchdog = load_module("node_health_watchdog")
+
+    warning = {
+        "sensor": "hermes",
+        "status": "warning",
+        "checks": [{"id": "hermes.state.cron.permission-regression", "status": "warning", "summary": "Cron path not group-readable"}],
+    }
+    ok = {"sensor": "hermes", "status": "ok", "checks": [{"id": "hermes.state.cron.permission-regression", "status": "ok", "summary": "Cron path readable"}]}
+
+    assert watchdog.run_once(tmp_path, sensor_fns=[lambda: warning], now="2026-05-06T06:00:00Z") == 0
+    assert watchdog.run_once(tmp_path, sensor_fns=[lambda: ok], now="2026-05-06T06:30:00Z") == 0
+
+    events = read_jsonl(tmp_path / "events" / "events.jsonl")
+    assert [e["status"] for e in events] == ["warning", "ok"]
+    assert events[1]["reason"] == "recovered"
+
+
+def test_sensor_crash_is_critical_event_but_watchdog_exits_zero(tmp_path: Path) -> None:
+    watchdog = load_module("node_health_watchdog")
+
+    def broken_sensor() -> dict[str, Any]:
+        raise RuntimeError("boom sk-testsecret000000000000000000000000")
+
+    assert watchdog.run_once(tmp_path, sensor_fns=[broken_sensor], now="2026-05-06T06:00:00Z") == 0
+    events = read_jsonl(tmp_path / "events" / "events.jsonl")
+    assert len(events) == 1
+    assert events[0]["status"] == "critical"
+    assert "sk-testsecret" not in json.dumps(events[0])
+
+
+def test_unwritable_snapshot_path_fails_plumbing(tmp_path: Path) -> None:
+    watchdog = load_module("node_health_watchdog")
+
+    (tmp_path / "harness").write_text("not-a-dir")
+    ok = {"sensor": "system", "status": "ok", "checks": []}
+
+    assert watchdog.run_once(tmp_path, sensor_fns=[lambda: ok], now="2026-05-06T06:00:00Z") == 2
+
+
+def test_unwritable_event_path_fails_plumbing(tmp_path: Path) -> None:
+    watchdog = load_module("node_health_watchdog")
+
+    # A file where the events directory must be makes observability plumbing broken
+    # even when running as root in CI.
+    (tmp_path / "events").write_text("not-a-dir")
+    ok = {"sensor": "system", "status": "ok", "checks": []}
+
+    assert watchdog.run_once(tmp_path, sensor_fns=[lambda: ok], now="2026-05-06T06:00:00Z") == 2
+
+
+def test_daily_report_is_deterministic_and_short(tmp_path: Path) -> None:
+    watchdog = load_module("node_health_watchdog")
+    report = load_module("render_daily_report")
+
+    warning = {
+        "sensor": "release_policy",
+        "status": "warning",
+        "checks": [{"id": "release.nixos24_05.unsupported", "status": "warning", "summary": "NixOS 24.05 unsupported"}],
+    }
+    assert watchdog.run_once(tmp_path, sensor_fns=[lambda: warning], now="2026-05-06T06:00:00Z") == 0
+
+    out = report.render(tmp_path, date="2026-05-06")
+
+    assert out.startswith("# Hermes Node Daily Local Brief — 2026-05-06")
+    assert "Status: Needs attention" in out
+    assert "Decisions needed:\nNone." in out
+    assert "/var/lib/hermes/harness/latest-sensors.json" in out
+    assert "journalctl" not in out
+
+
+def test_daily_report_ignores_corrupt_jsonl_lines(tmp_path: Path) -> None:
+    report = load_module("render_daily_report")
+
+    (tmp_path / "harness").mkdir()
+    (tmp_path / "events").mkdir()
+    (tmp_path / "harness" / "latest-sensors.json").write_text(json.dumps({"overall_status": "ok", "sensors": []}))
+    (tmp_path / "events" / "events.jsonl").write_text('{"time":"2026-05-06T01:00:00Z","id":"ok","status":"warning","summary":"bounded"}\n{bad json\n')
+
+    out = report.render(tmp_path, date="2026-05-06")
+
+    assert "ok — bounded" in out
+    assert "Status: OK" in out
+
+
+def test_gateway_config_localhost_counts_ok_when_no_listener(tmp_path: Path) -> None:
+    hermes_sensor = load_module("hermes_health_sensor")
+
+    config_dir = tmp_path / ".hermes"
+    config_dir.mkdir()
+    (config_dir / "config.yaml").write_text("gateway:\n  host: 127.0.0.1\n  port: 8080\n")
+
+    result = hermes_sensor._gateway_locality_check(tmp_path, port="65000")
+
+    assert result["status"] == "ok"
+    assert "localhost" in result["summary"]
+
+
+def test_hermes_status_success_has_no_detail(monkeypatch, tmp_path: Path) -> None:
+    hermes_sensor = load_module("hermes_health_sensor")
+
+    def fake_run_command(argv, timeout=5, env=None):
+        if argv[:2] == ["systemctl", "is-active"]:
+            return {"ok": True, "stdout": "active", "stderr": ""}
+        if argv[0] == "hermes":
+            return {"ok": True, "stdout": "MiniMax ✓ sk-c...4PzA", "stderr": ""}
+        if argv[0] == "ss":
+            return {"ok": True, "stdout": "", "stderr": ""}
+        return {"ok": True, "stdout": "", "stderr": ""}
+
+    monkeypatch.setattr(hermes_sensor, "run_command", fake_run_command)
+    (tmp_path / ".hermes").mkdir()
+    (tmp_path / ".hermes" / "config.yaml").write_text("gateway:\n  host: 127.0.0.1\n")
+
+    result = hermes_sensor.collect(tmp_path)
+    cli_check = next(c for c in result["checks"] if c["id"] == "hermes.cli.status")
+
+    assert cli_check["status"] == "ok"
+    assert "detail" not in cli_check
+    assert "sk-c" not in json.dumps(result)
+
+
+def test_static_nixos_harness_contract() -> None:
+    harness_nix = (REPO_ROOT / "system" / "nixos" / "harness.nix").read_text()
+    flake_nix = (REPO_ROOT / "system" / "nixos" / "flake.nix").read_text()
+
+    assert "users.users.hermes-harness" in harness_nix
+    assert "isSystemUser = true;" in harness_nix
+    assert "group = \"hermes\";" in harness_nix
+    assert "User = \"hermes-harness\";" in harness_nix
+    assert "Group = \"hermes\";" in harness_nix
+    assert "ProtectSystem = \"strict\";" in harness_nix
+    assert "ProtectHome = true;" in harness_nix
+    assert "InaccessiblePaths = [ \"-/var/lib/hermes/secrets\" ];" in harness_nix
+    assert "ReadWritePaths = [" in harness_nix
+    assert "Persistent = true;" in harness_nix
+    assert "OnUnitActiveSec = \"30min\";" in harness_nix
+    assert "RemainAfterExit" not in harness_nix
+    assert "Requires = [ \"hermes-agent.service\"" not in harness_nix
+    assert "./harness.nix" in flake_nix
