@@ -337,6 +337,56 @@ def test_send_delivery_brief_records_state_and_skips_duplicate_ntfy(
     assert state["last_success"]["message_sha256"]
 
 
+def test_send_delivery_brief_records_resolved_default_date(
+    tmp_path: Path, capsys: Any, monkeypatch: Any
+) -> None:
+    load_module("harness_common")
+    load_module("render_daily_report")
+    load_module("render_delivery_brief")
+    sender = load_module("send_delivery_brief")
+    _write_minimal_phase2_inputs(tmp_path, date="2026-05-07")
+    monkeypatch.setenv("HERMES_DELIVERY_NTFY_TOPIC", "test-topic")
+    calls: list[Any] = []
+
+    class FakeDate:
+        @staticmethod
+        def today() -> Any:
+            class Today:
+                def isoformat(self) -> str:
+                    return "2026-05-07"
+
+            return Today()
+
+    def fake_urlopen(request: Any, timeout: int) -> _FakeNtfyResponse:
+        calls.append((request, timeout))
+        return _FakeNtfyResponse()
+
+    monkeypatch.setattr(sender, "date_type", FakeDate)
+    monkeypatch.setattr(sender.urllib.request, "urlopen", fake_urlopen)
+    state_dir = tmp_path / "delivery-state"
+
+    first = sender.main([
+        "--base", str(tmp_path),
+        "--transport", "ntfy",
+        "--state-dir", str(state_dir),
+        "--once-per-date",
+    ])
+    second = sender.main([
+        "--base", str(tmp_path),
+        "--transport", "ntfy",
+        "--state-dir", str(state_dir),
+        "--once-per-date",
+    ])
+    captured = capsys.readouterr()
+    state = json.loads((state_dir / "delivery-state.json").read_text())
+
+    assert first == 0
+    assert second == 0
+    assert len(calls) == 1
+    assert state["last_success"]["date"] == "2026-05-07"
+    assert "Delivery skipped: already sent ntfy brief for 2026-05-07" in captured.out
+
+
 def test_send_delivery_brief_rate_limits_recent_success(tmp_path: Path, capsys: Any) -> None:
     load_module("harness_common")
     load_module("render_daily_report")
@@ -465,6 +515,7 @@ def test_static_nixos_harness_contract() -> None:
     assert "render_delivery_brief.py --base" in harness_nix
     assert "users.users.hermes-delivery" in harness_nix
     assert "system.activationScripts.hermesHarnessDirectories" in harness_nix
+    assert 'deps = [ "users" ];' in harness_nix
     assert "install -d -o hermes-delivery -g hermes -m 2770 /var/lib/hermes/delivery/state" in harness_nix
     assert "systemd.tmpfiles.rules" not in harness_nix
     assert "Hermes Phase 2 delivery sender" in harness_nix

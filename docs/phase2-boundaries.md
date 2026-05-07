@@ -176,9 +176,9 @@ The sender supports stateful safety gates for automation:
 - `--once-per-date` skips an identical successful payload for the same date/transport.
 - `--min-interval-seconds 82800` skips any send if the last success was less than 23 hours ago.
 - Skips exit `0` and print a clear `Delivery skipped: ...` line; they do not contact ntfy.
-- Successful ntfy sends record date, transport, message SHA-256, and send epoch. The topic/url is not recorded.
+- Successful ntfy sends record the resolved report date, transport, message SHA-256, and send epoch. The topic/url is not recorded.
 
-The manual send service is now wired with those gates but still has no timer. Directory materialization is handled by `system.activationScripts.hermesHarnessDirectories`, not `systemd.tmpfiles.rules`, because live validation found `systemd-tmpfiles-resetup.service` can fail with status 73 unsafe path transitions when `/var/lib/hermes` is owned by `hermes` and child directories are owned by service users (`hermes-harness`/`hermes-delivery`). The activation script explicitly creates `/var/lib/hermes/delivery/state` as `hermes-delivery:hermes` mode `2770` before service use.
+The manual send service is now wired with those gates but still has no timer. Directory materialization is handled by `system.activationScripts.hermesHarnessDirectories`, not `systemd.tmpfiles.rules`, because live validation found `systemd-tmpfiles-resetup.service` can fail with status 73 unsafe path transitions when `/var/lib/hermes` is owned by `hermes` and child directories are owned by service users (`hermes-harness`/`hermes-delivery`). The activation script depends on the NixOS `users` activation step and explicitly creates `/var/lib/hermes/delivery/state` as `hermes-delivery:hermes` mode `2770` before service use.
 
 Live validation should prove both paths before enabling scheduled delivery: first one successful send creates state, then an immediate second manual start skips without emitting another ntfy request.
 

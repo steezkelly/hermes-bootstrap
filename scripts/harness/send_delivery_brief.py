@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import date as date_type
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -103,6 +104,10 @@ def _message_sha256(message: str) -> str:
     return hashlib.sha256(message.encode("utf-8")).hexdigest()
 
 
+def _resolve_date(date: str | None) -> str:
+    return date if date is not None else date_type.today().isoformat()
+
+
 def _skip_reason(
     state: dict[str, Any],
     *,
@@ -145,14 +150,15 @@ def send(
     if transport == "dry-run":
         return _dry_run(render(base=base, date=date, max_chars=max_chars))
 
-    message = render(base=base, date=date, max_chars=max_chars)
+    resolved_date = _resolve_date(date)
+    message = render(base=base, date=resolved_date, max_chars=max_chars)
     state_file = _state_path(state_dir)
     state = _read_state(state_file)
     now = int(time.time() if now_epoch is None else now_epoch)
     message_sha256 = _message_sha256(message)
     if reason := _skip_reason(
         state,
-        date=date,
+        date=resolved_date,
         transport=transport,
         message_sha256=message_sha256,
         once_per_date=once_per_date,
@@ -166,7 +172,7 @@ def send(
         exit_code = _ntfy(message)
         if exit_code == 0:
             state["last_success"] = {
-                "date": date,
+                "date": resolved_date,
                 "transport": transport,
                 "message_sha256": message_sha256,
                 "sent_at_epoch": now,

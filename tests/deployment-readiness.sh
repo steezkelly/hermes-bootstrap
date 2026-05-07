@@ -145,6 +145,7 @@ assert_contains "$repo_root/system/nixos/harness.nix" 'state-dir.*delivery/state
 assert_contains "$repo_root/system/nixos/harness.nix" 'once-per-date'
 assert_contains "$repo_root/system/nixos/harness.nix" 'min-interval-seconds 82800'
 assert_contains "$repo_root/system/nixos/harness.nix" 'system\.activationScripts\.hermesHarnessDirectories'
+assert_contains "$repo_root/system/nixos/harness.nix" 'deps = \[ "users" \];'
 assert_contains "$repo_root/system/nixos/harness.nix" 'install -d -o hermes-delivery -g hermes -m 2770 /var/lib/hermes/delivery/state'
 assert_not_contains "$repo_root/system/nixos/harness.nix" 'systemd\.tmpfiles\.rules'
 assert_not_contains "$repo_root/system/nixos/harness.nix" 'systemd\.timers\.hermes-phase2-delivery-brief'
