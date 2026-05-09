@@ -66,6 +66,46 @@ let
       exec ${python}/bin/python3 -m evolution.core.action_routing_demo --out /var/lib/hermes/reports/evolution/action-routing-fixture --mode fixture --no-network --no-external-writes
     '';
   };
+  provisionFoundryCheckout = pkgs.writeShellApplication {
+    name = "hermes-provision-foundry-checkout";
+    runtimeInputs = [ python pkgs.coreutils pkgs.rsync pkgs.gnutar ];
+    text = ''
+      target=/var/lib/hermes/foundry/hermes-agent-self-evolution
+      if [ -d "$target/evolution" ]; then
+        echo "Foundry checkout already present: $target" >&2
+        exit 0
+      fi
+
+      # Bootstrap accepts a local source path via env var or fixed deploy-time
+      # copy.  No network clone, no GitHub credential, no external writes.
+      source="''${FOUNDRY_CHECKOUT_SOURCE:-}"
+      if [ -z "$source" ]; then
+        echo "FOUNDRY_CHECKOUT_SOURCE is not set.  Set it to a local" >&2
+        echo "Foundry repo path or tarball, e.g.:" >&2
+        echo "  FOUNDRY_CHECKOUT_SOURCE=/home/admin/steezkelly-hermes-agent-self-evolution" >&2
+        echo "Provisioning nothing and exiting 1." >&2
+        exit 1
+      fi
+
+      if [ -d "$source/evolution" ]; then
+        ${pkgs.coreutils}/bin/mkdir -p "$(dirname "$target")"
+        ${pkgs.rsync}/bin/rsync -a --delete "$source/" "$target/"
+        echo "Provisioned Foundry from directory: $source" >&2
+        exit 0
+      fi
+
+      if [ -f "$source" ]; then
+        ${pkgs.coreutils}/bin/mkdir -p "$(dirname "$target")"
+        ${pkgs.gnutar}/bin/tar -x -f "$source" -C "$(dirname "$target")"
+        echo "Provisioned Foundry from archive: $source" >&2
+        exit 0
+      fi
+
+      echo "FOUNDRY_CHECKOUT_SOURCE does not appear to be a Foundry checkout:" >&2
+      echo "  $source" >&2
+      exit 1
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -199,6 +239,16 @@ in
         "/var/lib/hermes/foundry"
       ];
       InaccessiblePaths = lib.mkForce [ "-/var/lib/hermes/secrets" ];
+    };
+  };
+
+  systemd.services.hermes-provision-foundry-checkout = {
+    description = "Provision Foundry checkout for manual appliance wrappers";
+    after = [ "hermes-agent.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${provisionFoundryCheckout}/bin/hermes-provision-foundry-checkout";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/foundry" ];
+      ReadOnlyPaths = lib.mkForce [ ];
     };
   };
 

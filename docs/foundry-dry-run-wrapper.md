@@ -2,6 +2,30 @@
 
 hermes-bootstrap provides a thin, manual systemd wrapper for the Foundry action-router fixture. The semantic loop remains in Agent Evolution Foundry; bootstrap only invokes it and stores local outputs.
 
+## Provisioning the Foundry checkout
+
+Before the wrapper can run, the Foundry repo must be placed at:
+
+```text
+/var/lib/hermes/foundry/hermes-agent-self-evolution
+```
+
+Use the provisioning service, which is manual/default-off:
+
+```bash
+FOUNDRY_CHECKOUT_SOURCE=/home/admin/steezkelly-hermes-agent-self-evolution \
+  systemctl start hermes-provision-foundry-checkout.service
+```
+
+The provisioning script accepts:
+
+- A local directory (must contain `evolution/` subdirectory): copies with rsync.
+- A local tarball (.tar, .tar.gz): extracts into place.
+
+The script refuses to provision from a network source. If `FOUNDRY_CHECKOUT_SOURCE` is unset, it prints usage and exits 1.
+
+After provisioning, the wrapper service can run the fixture.
+
 ## Service
 
 ```bash
