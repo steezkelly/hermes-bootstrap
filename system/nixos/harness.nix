@@ -315,6 +315,23 @@ let
       exec ${python}/bin/python3 ${harnessDir}/validate_foundry_trace_optimizer.py /var/lib/hermes/reports/evolution/trace-optimizer
     '';
   };
+  foundryGepaBridge = pkgs.writeShellApplication {
+    name = "hermes-evolution-foundry-gepa-bridge";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/../repos/steezkelly-hermes-agent-self-evolution/evolution/core/gepa_trace_bridge.py \
+        --candidate-artifacts /var/lib/hermes/reports/evolution/trace-optimizer/candidate_artifacts.json \
+        --out /var/lib/hermes/reports/evolution/gepa-bridge \
+        --no-network --no-external-writes
+    '';
+  };
+  validateFoundryGepaBridge = pkgs.writeShellApplication {
+    name = "hermes-validate-foundry-gepa-bridge";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_gepa_bridge.py /var/lib/hermes/reports/evolution/gepa-bridge
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -686,6 +703,35 @@ in
       ReadWritePaths = lib.mkForce [ ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/reports/evolution/trace-optimizer"
+      ];
+    };
+  };
+
+  systemd.services.hermes-evolution-foundry-gepa-bridge = {
+    description = "Bridge trace-optimizer templates into GEPA-ready datasets";
+    after = [ "hermes-evolution-foundry-trace-optimizer.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${foundryGepaBridge}/bin/hermes-evolution-foundry-gepa-bridge";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution/gepa-bridge" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+        "/var/lib/hermes/reports/evolution/trace-optimizer"
+      ];
+      InaccessiblePaths = lib.mkForce [
+        "-/var/lib/hermes/secrets"
+        "-/var/lib/hermes/.hermes/.env"
+      ];
+    };
+  };
+
+  systemd.services.hermes-validate-foundry-gepa-bridge = {
+    description = "Validate Foundry GEPA bridge output boundaries";
+    after = [ "hermes-evolution-foundry-gepa-bridge.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${validateFoundryGepaBridge}/bin/hermes-validate-foundry-gepa-bridge";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution/gepa-bridge"
       ];
     };
   };
