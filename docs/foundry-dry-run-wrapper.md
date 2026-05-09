@@ -120,11 +120,16 @@ Those remain Foundry's responsibility.
 FOUNDRY_CHECKOUT_SOURCE=/home/admin/steezkelly-hermes-agent-self-evolution \
   systemctl start hermes-provision-foundry-checkout.service
 
-# 2. Run the fixture
+# 2a. Run the action-routing fixture
 systemctl start hermes-evolution-foundry-action-routing-fixture.service
 
-# 3. Validate the output boundaries
+# 2b. Validate the action-routing fixture
 systemctl start hermes-validate-foundry-action-routing-fixture.service
+
+# 3a. Run the session-import fixture
+systemctl start hermes-evolution-foundry-session-import-fixture.service
 ```
+
+See `foundry-dry-run-wrapper.md` for the action-routing fixture details.
 
 Do not add bootstrap-side renderers for evidence, queue items, gate verdicts, or promotion dossiers.
