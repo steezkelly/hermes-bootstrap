@@ -107,6 +107,37 @@ def _new_record(event_id: str, condition_hash: str, seen_at: str) -> dict[str, A
     }
 
 
+def classify_readonly(
+    summarized: list[dict[str, Any]], state_dir: str | Path | None
+) -> list[tuple[dict[str, Any], str]]:
+    """Return (event, label) pairs without mutating alert state."""
+    state_path = _state_file(state_dir)
+    if state_path is None:
+        return [(item["latest"], "") for item in summarized]
+    state = _read_alert_state(state_path)
+    records = state.setdefault("critical_alerts", {})
+    if not isinstance(records, dict):
+        records = {}
+    classified: list[tuple[dict[str, Any], str]] = []
+    for item in summarized:
+        latest = item["latest"]
+        event_id = str(item["id"])
+        condition_hash = _condition_hash(latest)
+        previous = records.get(event_id)
+        if not isinstance(previous, dict):
+            label = "new"
+        elif previous.get("condition_hash") != condition_hash:
+            label = "new: changed"
+        elif previous.get("state") == "expired":
+            label = "new"
+        elif previous.get("state") == "acknowledged" or previous.get("acknowledged") is True:
+            label = "acknowledged"
+        else:
+            label = "repeated/known"
+        classified.append((latest, label))
+    return classified
+
+
 def _classify_and_update(
     summarized: list[dict[str, Any]], state: dict[str, Any], date: str
 ) -> tuple[list[tuple[dict[str, Any], str]], list[dict[str, Any]]]:

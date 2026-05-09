@@ -840,6 +840,9 @@ def test_static_phase2_delivery_contract() -> None:
     assert "condition_hash" in critical_alert_script
     assert "HERMES_DELIVERY_NTFY_TOPIC" not in critical_alert_script
     assert "urllib" not in critical_alert_script
+    assert "classify_readonly" in critical_alert_script
+    assert "from render_critical_alerts import" in delivery_script
+    assert "alert_state_dir" in delivery_script
     assert "Acknowledge" in ack_alert_script
     assert "No message was sent." in ack_alert_script
     assert "urllib" not in ack_alert_script

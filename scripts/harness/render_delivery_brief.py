@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from harness_common import iter_jsonl, load_json, redact
+from render_critical_alerts import _critical_events, _events_for_date, _summarize_by_id, classify_readonly
 from render_daily_report import DISPLAY_STATUS
 
 DEFAULT_MAX_CHARS = 1800
@@ -48,8 +49,13 @@ def _first_report_lines(report_text: str, limit: int = 8) -> list[str]:
     return lines
 
 
-def render(base: str | Path = "/var/lib/hermes", date: str | None = None, max_chars: int = DEFAULT_MAX_CHARS) -> str:
-    """Build a short operator-facing message from local redacted artifacts only."""
+def render(base: str | Path = "/var/lib/hermes", date: str | None = None, max_chars: int = DEFAULT_MAX_CHARS, alert_state_dir: str | Path | None = None) -> str:
+    """Build a short operator-facing message from local redacted artifacts only.
+
+    When alert_state_dir is provided, critical events are labeled with
+    classification tags ([new], [repeated/known], [acknowledged]) from the
+    read-only alert state. The state is never mutated by this function.
+    """
     if date is None:
         date = date_type.today().isoformat()
     base = Path(base)
@@ -76,10 +82,13 @@ def render(base: str | Path = "/var/lib/hermes", date: str | None = None, max_ch
     lines.append("")
     lines.append("Critical events today:")
     if critical:
-        for event in critical[:5]:
-            lines.append(f"- {event.get('time')}: {event.get('id')} — {event.get('summary')}")
-        if len(critical) > 5:
-            lines.append(f"- … {len(critical) - 5} more critical event(s) in local events.jsonl")
+        summarized = _summarize_by_id(critical)
+        classified = classify_readonly(summarized, alert_state_dir)
+        for latest, label in classified[:5]:
+            label_prefix = f"[{label}] " if label else ""
+            lines.append(f"- {label_prefix}{latest.get('time')}: {latest.get('id')} — {latest.get('summary', '')}")
+        if len(classified) > 5:
+            lines.append(f"- … {len(classified) - 5} more critical event(s) in local events.jsonl")
     else:
         lines.append("None.")
 
