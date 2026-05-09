@@ -384,4 +384,17 @@ in
       Unit = "hermes-phase2-delivery-brief-send.service";
     };
   };
+
+  # Weekly dry-run of the full evolution pipeline: run all fixtures,
+  # then validate all boundaries. Default disabled. No external writes.
+  systemd.timers.hermes-evolution-foundry-weekly-dry-run = lib.mkIf deployment.evolutionFoundryTimerEnabled {
+    description = "Weekly dry-run of evolution Foundry pipeline";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = deployment.evolutionFoundryTimerCalendar;
+      AccuracySec = "30min";
+      Persistent = true;
+      Unit = "hermes-evolution-foundry-action-routing-fixture.service";
+    };
+  };
 }
