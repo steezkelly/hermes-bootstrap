@@ -113,6 +113,19 @@ let
       exec ${python}/bin/python3 ${harnessDir}/validate_foundry_action_routing_fixture.py /var/lib/hermes/reports/evolution/action-routing-fixture
     '';
   };
+  foundrySessionImportFixture = pkgs.writeShellApplication {
+    name = "hermes-evolution-foundry-session-import-fixture";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
+      if [ ! -d "$foundry_repo/evolution" ]; then
+        echo "Foundry repo missing: $foundry_repo" >&2
+        exit 1
+      fi
+      cd "$foundry_repo"
+      exec ${python}/bin/python3 -m evolution.core.session_import_demo --out /var/lib/hermes/reports/evolution/session-import-fixture --mode fixture --no-network --no-external-writes
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -270,6 +283,19 @@ in
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/reports/evolution"
       ];
+    };
+  };
+
+  systemd.services.hermes-evolution-foundry-session-import-fixture = {
+    description = "Run Agent Evolution Foundry session-import fixture manually";
+    after = [ "hermes-agent.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${foundrySessionImportFixture}/bin/hermes-evolution-foundry-session-import-fixture";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+      ];
+      InaccessiblePaths = lib.mkForce [ "-/var/lib/hermes/secrets" ];
     };
   };
 
