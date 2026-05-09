@@ -131,6 +131,12 @@ systemctl start hermes-evolution-foundry-session-import-fixture.service
 
 # 3b. Validate the session-import fixture
 systemctl start hermes-validate-foundry-session-import-fixture.service
+
+# 4a. Run the tool-underuse fixture
+systemctl start hermes-evolution-foundry-tool-underuse-fixture.service
+
+# 4b. Validate the tool-underuse fixture
+systemctl start hermes-validate-foundry-tool-underuse-fixture.service
 ```
 
 See `foundry-dry-run-wrapper.md` for the action-routing fixture details.

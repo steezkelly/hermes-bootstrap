@@ -133,6 +133,26 @@ let
       exec ${python}/bin/python3 -m evolution.core.session_import_demo --out /var/lib/hermes/reports/evolution/session-import-fixture --mode fixture --no-network --no-external-writes
     '';
   };
+  foundryToolUnderuseFixture = pkgs.writeShellApplication {
+    name = "hermes-evolution-foundry-tool-underuse-fixture";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
+      if [ ! -d "$foundry_repo/evolution" ]; then
+        echo "Foundry repo missing: $foundry_repo" >&2
+        exit 1
+      fi
+      cd "$foundry_repo"
+      exec ${python}/bin/python3 -m evolution.core.tool_underuse_demo --out /var/lib/hermes/reports/evolution/tool-underuse-fixture --mode fixture --no-network --no-external-writes
+    '';
+  };
+  validateFoundryToolUnderuseFixture = pkgs.writeShellApplication {
+    name = "hermes-validate-foundry-tool-underuse-fixture";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_tool_underuse_fixture.py /var/lib/hermes/reports/evolution/tool-underuse-fixture
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -311,6 +331,31 @@ in
     after = [ "hermes-evolution-foundry-session-import-fixture.service" ];
     serviceConfig = commonServiceConfig // {
       ExecStart = "${validateFoundrySessionImportFixture}/bin/hermes-validate-foundry-session-import-fixture";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution"
+      ];
+    };
+  };
+
+  systemd.services.hermes-evolution-foundry-tool-underuse-fixture = {
+    description = "Run Agent Evolution Foundry tool-underuse fixture manually";
+    after = [ "hermes-agent.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${foundryToolUnderuseFixture}/bin/hermes-evolution-foundry-tool-underuse-fixture";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+      ];
+      InaccessiblePaths = lib.mkForce [ "-/var/lib/hermes/secrets" ];
+    };
+  };
+
+  systemd.services.hermes-validate-foundry-tool-underuse-fixture = {
+    description = "Validate Foundry tool-underuse fixture output boundaries";
+    after = [ "hermes-evolution-foundry-tool-underuse-fixture.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${validateFoundryToolUnderuseFixture}/bin/hermes-validate-foundry-tool-underuse-fixture";
       ReadWritePaths = lib.mkForce [ ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/reports/evolution"
