@@ -535,8 +535,11 @@ def test_static_nixos_harness_contract() -> None:
     assert 'phase2DeliveryTimerEnabled = false;' in deployment_nix
     assert 'phase2DeliveryTimerCalendar = "*-*-* 06:10:00";' in deployment_nix
     assert "deployment = import ./deployment-options.nix;" in harness_nix
-    assert "systemd.timers.hermes-phase2-delivery-brief-send = lib.mkIf deployment.phase2DeliveryTimerEnabled" in harness_nix
-    assert "OnCalendar = deployment.phase2DeliveryTimerCalendar;" in harness_nix
-    assert "Unit = \"hermes-phase2-delivery-brief-send.service\";" in harness_nix
-    assert "wantedBy = [ \"timers.target\" ];" in harness_nix
+    phase2_timer_start = harness_nix.index(
+        "systemd.timers.hermes-phase2-delivery-brief-send = lib.mkIf deployment.phase2DeliveryTimerEnabled"
+    )
+    phase2_timer_block = harness_nix[phase2_timer_start:]
+    assert "wantedBy = [ \"timers.target\" ];" in phase2_timer_block
+    assert "OnCalendar = deployment.phase2DeliveryTimerCalendar;" in phase2_timer_block
+    assert "Unit = \"hermes-phase2-delivery-brief-send.service\";" in phase2_timer_block
     assert "./harness.nix" in flake_nix
