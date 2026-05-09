@@ -153,6 +153,26 @@ let
       exec ${python}/bin/python3 ${harnessDir}/validate_foundry_tool_underuse_fixture.py /var/lib/hermes/reports/evolution/tool-underuse-fixture
     '';
   };
+  foundrySkillDriftFixture = pkgs.writeShellApplication {
+    name = "hermes-evolution-foundry-skill-drift-fixture";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
+      if [ ! -d "$foundry_repo/evolution" ]; then
+        echo "Foundry repo missing: $foundry_repo" >&2
+        exit 1
+      fi
+      cd "$foundry_repo"
+      exec ${python}/bin/python3 -m evolution.core.skill_drift_demo --out /var/lib/hermes/reports/evolution/skill-drift-fixture --mode fixture --no-network --no-external-writes
+    '';
+  };
+  validateFoundrySkillDriftFixture = pkgs.writeShellApplication {
+    name = "hermes-validate-foundry-skill-drift-fixture";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_skill_drift_fixture.py /var/lib/hermes/reports/evolution/skill-drift-fixture
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -356,6 +376,31 @@ in
     after = [ "hermes-evolution-foundry-tool-underuse-fixture.service" ];
     serviceConfig = commonServiceConfig // {
       ExecStart = "${validateFoundryToolUnderuseFixture}/bin/hermes-validate-foundry-tool-underuse-fixture";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution"
+      ];
+    };
+  };
+
+  systemd.services.hermes-evolution-foundry-skill-drift-fixture = {
+    description = "Run Agent Evolution Foundry skill-drift fixture manually";
+    after = [ "hermes-agent.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${foundrySkillDriftFixture}/bin/hermes-evolution-foundry-skill-drift-fixture";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+      ];
+      InaccessiblePaths = lib.mkForce [ "-/var/lib/hermes/secrets" ];
+    };
+  };
+
+  systemd.services.hermes-validate-foundry-skill-drift-fixture = {
+    description = "Validate Foundry skill-drift fixture output boundaries";
+    after = [ "hermes-evolution-foundry-skill-drift-fixture.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${validateFoundrySkillDriftFixture}/bin/hermes-validate-foundry-skill-drift-fixture";
       ReadWritePaths = lib.mkForce [ ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/reports/evolution"
