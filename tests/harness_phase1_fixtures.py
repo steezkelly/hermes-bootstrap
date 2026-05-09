@@ -355,6 +355,165 @@ def test_phase2_critical_alert_candidates_report_quiet_when_no_critical_events(t
     assert "No message was sent." in out
 
 
+def test_phase2_critical_alert_state_marks_new_then_repeated_without_secrets(tmp_path: Path) -> None:
+    load_module("harness_common")
+    load_module("render_daily_report")
+    alerts = load_module("render_critical_alerts")
+
+    (tmp_path / "harness").mkdir()
+    (tmp_path / "events").mkdir()
+    (tmp_path / "harness" / "latest-sensors.json").write_text(json.dumps({"overall_status": "critical", "sensors": []}))
+    (tmp_path / "events" / "events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "time": "2026-05-06T07:00:00Z",
+                        "id": "hermes.state.cron.permission-regression",
+                        "status": "critical",
+                        "summary": "Cron path regressed token=secret-value",
+                        "detail": "raw journal line should not persist Authorization: Bearer bearer-secret-value",
+                        "reason": "first_seen",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "time": "2026-05-06T07:30:00Z",
+                        "id": "release.nixos24_05.unsupported",
+                        "status": "warning",
+                        "summary": "NixOS 24.05 unsupported",
+                        "reason": "first_seen",
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+    state_dir = tmp_path / "delivery" / "state" / "alerts"
+
+    first = alerts.render(tmp_path, date="2026-05-06", state_dir=state_dir)
+    second = alerts.render(tmp_path, date="2026-05-06", state_dir=state_dir)
+    state_text = (state_dir / "critical-alert-state.json").read_text()
+    state = json.loads(state_text)
+
+    assert "[new]" in first
+    assert "[repeated/known]" in second
+    assert "release.nixos24_05.unsupported" not in first
+    assert "release.nixos24_05.unsupported" not in state_text
+    assert "secret-value" not in state_text
+    assert "Authorization" not in state_text
+    assert "journal" not in state_text
+    item = state["critical_alerts"]["hermes.state.cron.permission-regression"]
+    assert item["event_id"] == "hermes.state.cron.permission-regression"
+    assert item["severity"] == "critical"
+    assert item["state"] == "known"
+    assert item["condition_hash"]
+    assert item["first_seen"] == "2026-05-06T07:00:00Z"
+    assert item["last_seen"] == "2026-05-06T07:00:00Z"
+    assert item["seen_count"] == 2
+    assert "summary" not in item
+    assert "detail" not in item
+
+
+def test_phase2_critical_alert_state_marks_material_change_as_new_attention(tmp_path: Path) -> None:
+    load_module("harness_common")
+    load_module("render_daily_report")
+    alerts = load_module("render_critical_alerts")
+
+    (tmp_path / "harness").mkdir()
+    (tmp_path / "events").mkdir()
+    (tmp_path / "harness" / "latest-sensors.json").write_text(json.dumps({"overall_status": "critical", "sensors": []}))
+    events_path = tmp_path / "events" / "events.jsonl"
+    events_path.write_text(
+        json.dumps(
+            {
+                "time": "2026-05-06T07:00:00Z",
+                "id": "sensor.hermes.crash",
+                "status": "critical",
+                "summary": "Sensor crashed with timeout",
+            }
+        )
+        + "\n"
+    )
+    state_dir = tmp_path / "delivery" / "state" / "alerts"
+
+    first = alerts.render(tmp_path, date="2026-05-06", state_dir=state_dir)
+    before = json.loads((state_dir / "critical-alert-state.json").read_text())
+    events_path.write_text(
+        json.dumps(
+            {
+                "time": "2026-05-06T08:00:00Z",
+                "id": "sensor.hermes.crash",
+                "status": "critical",
+                "summary": "Sensor crashed with disk full",
+            }
+        )
+        + "\n"
+    )
+    second = alerts.render(tmp_path, date="2026-05-06", state_dir=state_dir)
+    after = json.loads((state_dir / "critical-alert-state.json").read_text())
+
+    assert "[new]" in first
+    assert "[new: changed]" in second
+    item = after["critical_alerts"]["sensor.hermes.crash"]
+    assert item["condition_hash"] != before["critical_alerts"]["sensor.hermes.crash"]["condition_hash"]
+    assert item["state"] == "known"
+    assert item["last_seen"] == "2026-05-06T08:00:00Z"
+
+
+def test_phase2_critical_alert_state_reports_acknowledged_and_expired(tmp_path: Path) -> None:
+    load_module("harness_common")
+    load_module("render_daily_report")
+    alerts = load_module("render_critical_alerts")
+
+    (tmp_path / "harness").mkdir()
+    (tmp_path / "events").mkdir()
+    (tmp_path / "harness" / "latest-sensors.json").write_text(json.dumps({"overall_status": "critical", "sensors": []}))
+    events_path = tmp_path / "events" / "events.jsonl"
+    events_path.write_text(
+        json.dumps(
+            {
+                "time": "2026-05-06T07:00:00Z",
+                "id": "hermes.gateway.down",
+                "status": "critical",
+                "summary": "Gateway service down",
+            }
+        )
+        + "\n"
+    )
+    state_dir = tmp_path / "delivery" / "state" / "alerts"
+
+    alerts.render(tmp_path, date="2026-05-06", state_dir=state_dir)
+    state_path = state_dir / "critical-alert-state.json"
+    state = json.loads(state_path.read_text())
+    state["critical_alerts"]["hermes.gateway.down"]["state"] = "acknowledged"
+    state["critical_alerts"]["hermes.gateway.down"]["acknowledged"] = True
+    state["critical_alerts"]["hermes.gateway.down"]["acknowledged_at"] = "2026-05-06T07:05:00Z"
+    state_path.write_text(json.dumps(state, sort_keys=True, indent=2) + "\n")
+
+    acknowledged = alerts.render(tmp_path, date="2026-05-06", state_dir=state_dir)
+    events_path.write_text(
+        json.dumps(
+            {
+                "time": "2026-05-07T07:00:00Z",
+                "id": "hermes.gateway.down",
+                "status": "warning",
+                "summary": "Gateway service degraded but not critical",
+            }
+        )
+        + "\n"
+    )
+    expired = alerts.render(tmp_path, date="2026-05-07", state_dir=state_dir)
+    final_state = json.loads(state_path.read_text())
+
+    assert "[acknowledged]" in acknowledged
+    assert "No critical events for 2026-05-07." in expired
+    assert "Expired critical state:" in expired
+    assert "hermes.gateway.down — expired" in expired
+    assert final_state["critical_alerts"]["hermes.gateway.down"]["state"] == "expired"
+    assert final_state["critical_alerts"]["hermes.gateway.down"]["expired_at"] == "2026-05-07"
+
+
 def _write_minimal_phase2_inputs(base: Path, date: str = "2026-05-06") -> None:
     (base / "harness").mkdir()
     (base / "events").mkdir()
@@ -574,6 +733,11 @@ def test_static_phase2_delivery_contract() -> None:
     assert "email transport is not implemented" in sender_script
     assert "No message was sent." in critical_alert_script
     assert "events.jsonl" in critical_alert_script
+    assert "--state-dir" in critical_alert_script
+    assert "critical-alert-state.json" in critical_alert_script
+    assert "condition_hash" in critical_alert_script
+    assert "HERMES_DELIVERY_NTFY_TOPIC" not in critical_alert_script
+    assert "urllib" not in critical_alert_script
     assert "/var/lib/hermes/secrets/hermes.env" not in critical_alert_script
     assert "journalctl" not in critical_alert_script
     assert "local report exists -> delivery renderer builds bounded message" in phase2_doc
@@ -604,6 +768,9 @@ def test_static_nixos_harness_contract() -> None:
     assert "hermes-phase2-critical-alert-dry-run" in harness_nix
     assert "Render Hermes Phase 2 critical alert candidates dry-run" in harness_nix
     assert "render_critical_alerts.py --base" in harness_nix
+    assert "--state-dir ${harnessBase}/delivery/state/alerts" in harness_nix
+    assert "install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/delivery/state/alerts" in harness_nix
+    assert 'ReadWritePaths = lib.mkForce [ "/var/lib/hermes/delivery/state/alerts" ];' in harness_nix
     assert "systemd.timers.hermes-phase2-critical-alert" not in harness_nix
     assert "users.users.hermes-delivery" in harness_nix
     assert "system.activationScripts.hermesHarnessDirectories" in harness_nix

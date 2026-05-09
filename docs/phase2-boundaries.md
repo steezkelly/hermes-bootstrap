@@ -212,7 +212,32 @@ Diagnose receipt separately from Hermes delivery. If ntfy returns HTTP 200 but n
 
 The next bounded-alert step is a local, no-send critical alert candidate renderer, not an always-on urgent sender. `scripts/harness/render_critical_alerts.py` reads only `/var/lib/hermes/events/events.jsonl` and `/var/lib/hermes/harness/latest-sensors.json`, filters for critical events on the selected date, collapses repeated emissions by event id, redacts token-like values, caps output length, and prints explicit local inspect commands.
 
-NixOS wires it as a manual disabled-by-default oneshot named `hermes-phase2-critical-alert-dry-run`. It has no timer, no `wantedBy`, no delivery credentials, no network transport, no writes, and no raw journal export. Operators can start it manually to inspect what would be considered an urgent alert candidate before adding acknowledgement state or any live critical-alert sender.
+NixOS wires it as a manual disabled-by-default oneshot named `hermes-phase2-critical-alert-dry-run`. It has no timer, no `wantedBy`, no delivery credentials, no network transport, no raw journal export, and only writes local acknowledgement/dedupe metadata when `--state-dir` is configured. Operators can start it manually to inspect what would be considered an urgent alert candidate before adding any live critical-alert sender.
+
+## Critical alert acknowledgement/dedupe state
+
+The critical alert dry-run now supports local state at `/var/lib/hermes/delivery/state/alerts/critical-alert-state.json`. This remains a no-send dry-run path: the state file is local metadata only and does not introduce ntfy/email credentials, transport code, timers, or `wantedBy` wiring.
+
+State records only safe metadata:
+
+- stable event id, or a bounded `hash:<prefix>` key when no id exists
+- `condition_hash` for the material critical condition
+- severity/status fields such as `severity`, `last_status`, and `state`
+- `first_seen`, `last_seen`, `seen_count`, and optional acknowledgement/expiry timestamps
+- acknowledgement markers such as `acknowledged` and `acknowledged_at`
+
+State must not store ntfy topics, URLs, tokens, raw journal lines, event details, summaries, or full payloads. Material comparison may hash redacted summary/detail in memory, but only the hash is persisted.
+
+Dry-run output classifies critical candidates as `new, repeated/known, acknowledged, or expired`:
+
+- `new`: first local sighting of a critical condition, or a previously expired condition that reappears.
+- `repeated/known`: same stable event id/hash and same `condition_hash` after it is already in state.
+- `acknowledged`: same condition has been manually marked acknowledged in the local state file.
+- `expired`: a previously active critical state is absent from the selected date's critical events; warning events alone do not become urgent alerts.
+
+The NixOS dry-run service runs as `hermes-harness`, reads `/var/lib/hermes/harness` and `/var/lib/hermes/events`, and writes only `/var/lib/hermes/delivery/state/alerts`. The activation script creates that directory explicitly as `hermes-harness:hermes` mode `2770`.
+
+Live validation remains manual and no-send: list Phase 2 timers, start only `hermes-phase2-critical-alert-dry-run.service`, inspect its result/journal, and confirm there are no ntfy/email send markers.
 
 This preserves the Phase 2 alert order:
 

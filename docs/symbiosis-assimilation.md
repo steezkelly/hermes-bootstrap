@@ -16,7 +16,7 @@ Hermes-Symbiosis phrases the loop as Orchestrator coordinates, Space-UI reveals,
 | --- | --- | --- | --- |
 | Orchestrator coordinates | systemd/NixOS coordinates local services | Phase 1 timers, daily report renderer, default-off delivery timer | explicit service graph docs and rollback probes |
 | Space-UI reveals | local renderers reveal operator attention | `render_delivery_brief.py`, `render_critical_alerts.py`, service journals | short action cards derived from local reports/events |
-| Mythos/Exhaust persists | local state prevents repeated failure loops | delivery state and event ids | critical alert acknowledgement state |
+| Mythos/Exhaust persists | local state prevents repeated failure loops | delivery state, event ids, and critical alert acknowledgement state | explicit operator acknowledgement workflow |
 
 ## Hard boundaries
 
@@ -39,11 +39,13 @@ local critical events -> critical alert candidate renderer -> acknowledgement/de
 Acceptance criteria before any live critical-alert sender:
 
 1. Acknowledgement state is stored under a delivery/alerts state directory owned by the least-privilege service identity.
-2. Repeated critical events with the same stable event id are collapsed and marked as known until the acknowledgement window expires or the event changes materially.
-3. State never records secrets, topics, raw journal lines, or full payloads.
-4. Dry-run output can explain whether an alert is new, known-unacknowledged, acknowledged, or expired.
+2. Repeated critical events with the same stable event id and `condition_hash` are collapsed and marked as `repeated/known` until the local state is acknowledged, expired, or the event changes materially.
+3. State never records secrets, topics, raw journal lines, summaries, details, or full payloads.
+4. Dry-run output can explain whether an alert is new, repeated/known, acknowledged, or expired.
 5. Tests prove warnings do not become urgent alerts and no timer/send path is introduced.
 6. Live validation starts only the dry-run service and confirms no `hermes-phase2*` timer and no ntfy/email send marker.
+
+Implemented state file: `/var/lib/hermes/delivery/state/alerts/critical-alert-state.json`. It persists stable event ids or hash keys, `condition_hash`, severity/status, `first_seen`, `last_seen`, `seen_count`, acknowledgement markers, and expiry markers only. The dry-run service may write that local state path, but it still has no network transport, no delivery credentials, no timer, and no automatic delivery.
 
 ## Why this belongs here
 

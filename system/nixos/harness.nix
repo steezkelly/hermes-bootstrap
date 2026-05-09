@@ -34,7 +34,7 @@ let
     runtimeInputs = [ python pkgs.coreutils ];
     text = ''
       export PYTHONPATH=${harnessDir}:''${PYTHONPATH:-}
-      exec ${python}/bin/python3 ${harnessDir}/render_critical_alerts.py --base ${harnessBase} --dry-run
+      exec ${python}/bin/python3 ${harnessDir}/render_critical_alerts.py --base ${harnessBase} --state-dir ${harnessBase}/delivery/state/alerts --dry-run
     '';
   };
   phase2DeliverySend = pkgs.writeShellApplication {
@@ -89,6 +89,7 @@ in
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/daily
       ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2750 /var/lib/hermes/delivery
       ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2770 /var/lib/hermes/delivery/state
+      ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/delivery/state/alerts
     '';
   };
 
@@ -138,7 +139,7 @@ in
     after = [ "hermes-node-health-watchdog.service" ];
     serviceConfig = commonServiceConfig // {
       ExecStart = "${phase2CriticalAlertDryRun}/bin/hermes-phase2-critical-alert-dry-run";
-      ReadWritePaths = lib.mkForce [ ];
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/delivery/state/alerts" ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/harness"
         "/var/lib/hermes/events"
