@@ -239,6 +239,30 @@ The NixOS dry-run service runs as `hermes-harness`, reads `/var/lib/hermes/harne
 
 Live validation remains manual and no-send: list Phase 2 timers, start only `hermes-phase2-critical-alert-dry-run.service`, inspect its result/journal, and confirm there are no ntfy/email send markers.
 
+Live no-send validation passed on the mini-PC at commit `8f938d3`: after applying the config with `phase2DeliveryTimerEnabled = false`, `systemctl list-timers "hermes-phase2*" --all` returned `0 timers listed`; manual start of `hermes-phase2-critical-alert-dry-run.service` returned `Result=success`, `ExecMainCode=0`, `ExecMainStatus=0`, `ActiveState=inactive`; the journal printed `No message was sent.` and no ntfy/email send markers; `/var/lib/hermes/delivery/state/alerts/critical-alert-state.json` existed with only `critical_alerts` and `last_render_date` metadata.
+
+Operators can acknowledge an existing local critical-alert state record without editing JSON by running:
+
+```bash
+sudo -u hermes-harness /run/current-system/sw/bin/python3 \
+  /etc/nixos/harness-scripts/ack_critical_alert.py \
+  --state-dir /var/lib/hermes/delivery/state/alerts \
+  --event-id <existing-critical-event-id>
+```
+
+`ack_critical_alert.py` only mutates `critical-alert-state.json`. It rejects missing event ids by default, records `acknowledged=true`, `acknowledged_at`, `acknowledged_by`, and keeps summaries, details, comments, raw payloads, journals, topics, URLs, tokens, and delivery credentials out of state. A later renderer run reports the matching condition as `[acknowledged]`.
+
+## Future critical-alert live-send design gate
+
+Do not implement critical-alert live delivery until this design is explicitly accepted. The intended future gate is:
+
+1. Dedupe key: stable event id or hash key plus `condition_hash`, not the rendered payload text.
+2. Resend window: no repeated live alert for the same unacknowledged condition until a configured minimum interval has elapsed; acknowledged conditions should not send again unless the condition hash changes.
+3. One-send validation budget: the first live critical alert validation may perform exactly one provider send, then an immediate second start must skip before provider contact.
+4. Failure behavior: missing credentials, unsupported transports, corrupt state, or provider failure must fail closed and must not write success state.
+5. State transitions: `new` -> live-send attempted/sent -> `known`; `known` -> `acknowledged` by local operator command; `known`/`acknowledged` -> `new: changed` when `condition_hash` changes; absent critical candidates -> `expired`.
+6. Steve decision boundary: enabling any critical-alert sender, adding credentials, or enabling any recurring/timer path requires an explicit operator decision separate from this dry-run/acknowledgement state work.
+
 This preserves the Phase 2 alert order:
 
 ```text

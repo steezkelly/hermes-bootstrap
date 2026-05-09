@@ -47,6 +47,12 @@ Acceptance criteria before any live critical-alert sender:
 
 Implemented state file: `/var/lib/hermes/delivery/state/alerts/critical-alert-state.json`. It persists stable event ids or hash keys, `condition_hash`, severity/status, `first_seen`, `last_seen`, `seen_count`, acknowledgement markers, and expiry markers only. The dry-run service may write that local state path, but it still has no network transport, no delivery credentials, no timer, and no automatic delivery.
 
+Live no-send validation passed on the mini-PC for commit `8f938d3`: `systemctl list-timers "hermes-phase2*" --all` returned `0 timers listed`, the manual dry-run service completed with `Result=success`, the journal printed `No message was sent.`, no ntfy/email send markers appeared, and the state file contained only safe metadata.
+
+Local acknowledgement command: `scripts/harness/ack_critical_alert.py` marks an existing state record as acknowledged without network transport or credential access. It rejects missing event ids by default, writes `acknowledged=true`, `acknowledged_at`, and `acknowledged_by`, and the renderer then reports `[acknowledged]`.
+
+Future critical-alert live delivery remains design-only until Steve explicitly accepts a separate gate: dedupe by event id/hash plus `condition_hash`, bounded resend window, one-send validation budget, fail-closed state behavior, explicit state transitions, and a separate operator decision before any sender, credential, or timer exists.
+
 ## Why this belongs here
 
 `hermes-bootstrap` is the reproducible habitat for a single Hermes Agent node. It should not become the whole Hermes-Symbiosis stack. It should, however, make the single-node substrate ready for that stack by producing reliable local artifacts, bounded operator messages, and durable local state that a future orchestrator or UI can consume safely.

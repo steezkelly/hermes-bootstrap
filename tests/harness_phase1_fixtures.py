@@ -514,6 +514,107 @@ def test_phase2_critical_alert_state_reports_acknowledged_and_expired(tmp_path: 
     assert final_state["critical_alerts"]["hermes.gateway.down"]["expired_at"] == "2026-05-07"
 
 
+def test_ack_critical_alert_marks_existing_state_without_payloads(tmp_path: Path, capsys: Any) -> None:
+    load_module("harness_common")
+    ack = load_module("ack_critical_alert")
+    state_dir = tmp_path / "delivery" / "state" / "alerts"
+    state_dir.mkdir(parents=True)
+    state_path = state_dir / "critical-alert-state.json"
+    state_path.write_text(json.dumps({
+        "critical_alerts": {
+            "hermes.gateway.down": {
+                "event_id": "hermes.gateway.down",
+                "condition_hash": "abc123",
+                "severity": "critical",
+                "last_status": "critical",
+                "state": "known",
+                "acknowledged": False,
+                "first_seen": "2026-05-06T07:00:00Z",
+                "last_seen": "2026-05-06T07:00:00Z",
+                "seen_count": 1,
+            }
+        }
+    }))
+
+    exit_code = ack.main([
+        "--state-dir", str(state_dir),
+        "--event-id", "hermes.gateway.down",
+        "--acknowledged-at", "2026-05-06T07:05:00Z",
+        "--acknowledged-by", "local-operator",
+    ])
+    captured = capsys.readouterr()
+    updated_text = state_path.read_text()
+    updated = json.loads(updated_text)
+    item = updated["critical_alerts"]["hermes.gateway.down"]
+
+    assert exit_code == 0
+    assert "Acknowledged critical alert hermes.gateway.down" in captured.out
+    assert item["state"] == "acknowledged"
+    assert item["acknowledged"] is True
+    assert item["acknowledged_at"] == "2026-05-06T07:05:00Z"
+    assert item["acknowledged_by"] == "local-operator"
+    assert item["condition_hash"] == "abc123"
+    assert "summary" not in item
+    assert "detail" not in item
+    assert "payload" not in updated_text
+    assert "secret" not in updated_text.lower()
+
+
+def test_ack_critical_alert_rejects_missing_event_without_mutation(tmp_path: Path, capsys: Any) -> None:
+    load_module("harness_common")
+    ack = load_module("ack_critical_alert")
+    state_dir = tmp_path / "delivery" / "state" / "alerts"
+    state_dir.mkdir(parents=True)
+    state_path = state_dir / "critical-alert-state.json"
+    before = {"critical_alerts": {}}
+    state_path.write_text(json.dumps(before, sort_keys=True, indent=2) + "\n")
+
+    exit_code = ack.main([
+        "--state-dir", str(state_dir),
+        "--event-id", "missing.event",
+        "--acknowledged-at", "2026-05-06T07:05:00Z",
+    ])
+    captured = capsys.readouterr()
+    after = json.loads(state_path.read_text())
+
+    assert exit_code == 2
+    assert "not found" in captured.err
+    assert after == before
+
+
+def test_ack_critical_alert_makes_renderer_report_acknowledged(tmp_path: Path) -> None:
+    load_module("harness_common")
+    load_module("render_daily_report")
+    alerts = load_module("render_critical_alerts")
+    ack = load_module("ack_critical_alert")
+
+    (tmp_path / "harness").mkdir()
+    (tmp_path / "events").mkdir()
+    (tmp_path / "harness" / "latest-sensors.json").write_text(json.dumps({"overall_status": "critical", "sensors": []}))
+    (tmp_path / "events" / "events.jsonl").write_text(
+        json.dumps({
+            "time": "2026-05-06T07:00:00Z",
+            "id": "hermes.gateway.down",
+            "status": "critical",
+            "summary": "Gateway service down",
+        })
+        + "\n"
+    )
+    state_dir = tmp_path / "delivery" / "state" / "alerts"
+
+    first = alerts.render(tmp_path, date="2026-05-06", state_dir=state_dir)
+    ack_exit = ack.main([
+        "--state-dir", str(state_dir),
+        "--event-id", "hermes.gateway.down",
+        "--acknowledged-at", "2026-05-06T07:05:00Z",
+    ])
+    second = alerts.render(tmp_path, date="2026-05-06", state_dir=state_dir)
+
+    assert "[new]" in first
+    assert ack_exit == 0
+    assert "[acknowledged]" in second
+
+
 def _write_minimal_phase2_inputs(base: Path, date: str = "2026-05-06") -> None:
     (base / "harness").mkdir()
     (base / "events").mkdir()
@@ -712,6 +813,7 @@ def test_send_delivery_brief_rejects_ntfy_without_topic(tmp_path: Path, capsys: 
 def test_static_phase2_delivery_contract() -> None:
     delivery_script = (REPO_ROOT / "scripts" / "harness" / "render_delivery_brief.py").read_text()
     critical_alert_script = (REPO_ROOT / "scripts" / "harness" / "render_critical_alerts.py").read_text()
+    ack_alert_script = (REPO_ROOT / "scripts" / "harness" / "ack_critical_alert.py").read_text()
     sender_script = (REPO_ROOT / "scripts" / "harness" / "send_delivery_brief.py").read_text()
     phase2_doc = (REPO_ROOT / "docs" / "phase2-boundaries.md").read_text()
 
@@ -738,6 +840,13 @@ def test_static_phase2_delivery_contract() -> None:
     assert "condition_hash" in critical_alert_script
     assert "HERMES_DELIVERY_NTFY_TOPIC" not in critical_alert_script
     assert "urllib" not in critical_alert_script
+    assert "Acknowledge" in ack_alert_script
+    assert "No message was sent." in ack_alert_script
+    assert "urllib" not in ack_alert_script
+    assert "HERMES_DELIVERY_NTFY_TOPIC" not in ack_alert_script
+    assert "smtplib" not in ack_alert_script
+    assert "/var/lib/hermes/secrets/hermes.env" not in ack_alert_script
+    assert "journalctl" not in ack_alert_script
     assert "/var/lib/hermes/secrets/hermes.env" not in critical_alert_script
     assert "journalctl" not in critical_alert_script
     assert "local report exists -> delivery renderer builds bounded message" in phase2_doc
