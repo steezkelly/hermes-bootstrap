@@ -90,4 +90,41 @@ bootstrap owns:
 - fail-closed local wrapper behavior
 - mechanical boundary validation
 
+## Boundary validation
+
+After the fixture runs, validate the output mechanically:
+
+```bash
+systemctl start hermes-validate-foundry-action-routing-fixture.service
+```
+
+The validator is manual/default-off (no timer, no wantedBy). It checks only:
+
+- All 4 expected files exist
+- Each .json file parses as valid JSON
+- `schema_version` is a positive integer in every JSON artifact
+- `external_writes_allowed` (and safety block) are explicitly `false`
+
+The validator does NOT evaluate:
+
+- Action-item priority or bucket assignments
+- Baseline vs. candidate pass/fail verdicts
+- Promotion recommendations or dossier prose
+
+Those remain Foundry's responsibility.
+
+## End-to-end manual flow
+
+```bash
+# 1. Place the Foundry checkout
+FOUNDRY_CHECKOUT_SOURCE=/home/admin/steezkelly-hermes-agent-self-evolution \
+  systemctl start hermes-provision-foundry-checkout.service
+
+# 2. Run the fixture
+systemctl start hermes-evolution-foundry-action-routing-fixture.service
+
+# 3. Validate the output boundaries
+systemctl start hermes-validate-foundry-action-routing-fixture.service
+```
+
 Do not add bootstrap-side renderers for evidence, queue items, gate verdicts, or promotion dossiers.
