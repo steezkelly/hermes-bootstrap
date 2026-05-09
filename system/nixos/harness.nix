@@ -180,6 +180,36 @@ let
       exec ${python}/bin/python3 ${harnessDir}/promote_foundry_fixture.py "$@"
     '';
   };
+  foundryRealTraceIngestion = pkgs.writeShellApplication {
+    name = "hermes-evolution-foundry-real-trace-ingestion";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
+      if [ ! -d "$foundry_repo/evolution" ]; then
+        echo "Foundry repo missing: $foundry_repo" >&2
+        exit 1
+      fi
+      trace="''${REAL_TRACE_SOURCE:-}"
+      if [ -z "$trace" ]; then
+        echo "REAL_TRACE_SOURCE is not set. Pass the path to an exported Hermes session JSONL file." >&2
+        echo "Example: REAL_TRACE_SOURCE=/var/lib/hermes/.hermes/sessions/session_export.jsonl" >&2
+        exit 1
+      fi
+      if [ ! -f "$trace" ]; then
+        echo "Trace file not found: $trace" >&2
+        exit 1
+      fi
+      cd "$foundry_repo"
+      exec ${python}/bin/python3 -m evolution.core.real_trace_ingestion --trace "$trace" --out /var/lib/hermes/reports/evolution/real-trace-ingestion --mode real_trace --no-network --no-external-writes
+    '';
+  };
+  validateFoundryRealTraceIngestion = pkgs.writeShellApplication {
+    name = "hermes-validate-foundry-real-trace-ingestion";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_real_trace_ingestion.py /var/lib/hermes/reports/evolution/real-trace-ingestion
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -423,6 +453,32 @@ in
       AccuracySec = "5min";
       Persistent = true;
       Unit = "hermes-daily-local-brief.service";
+    };
+  };
+
+  systemd.services.hermes-evolution-foundry-real-trace-ingestion = {
+    description = "Ingest a real Hermes session trace through Foundry detectors manually";
+    after = [ "hermes-agent.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${foundryRealTraceIngestion}/bin/hermes-evolution-foundry-real-trace-ingestion";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+        "/var/lib/hermes/.hermes/sessions"
+      ];
+      InaccessiblePaths = lib.mkForce [ "-/var/lib/hermes/secrets" ];
+    };
+  };
+
+  systemd.services.hermes-validate-foundry-real-trace-ingestion = {
+    description = "Validate Foundry real-trace ingestion output boundaries";
+    after = [ "hermes-evolution-foundry-real-trace-ingestion.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${validateFoundryRealTraceIngestion}/bin/hermes-validate-foundry-real-trace-ingestion";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution"
+      ];
     };
   };
 
