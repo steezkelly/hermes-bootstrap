@@ -182,6 +182,18 @@ The manual send service is now wired with those gates but still has no timer. Di
 
 Live validation should prove both paths before enabling scheduled delivery: first one successful send creates state, then an immediate second manual start skips without emitting another ntfy request.
 
+### Strict delivery validation doctrine
+
+Use this doctrine for every future live delivery validation, even outside ntfy:
+
+1. Resolve the report date and render/hash the payload before checking duplicate-send gates.
+2. Materialize state directories before service use; do not rely on tmpfiles when parent/child ownership crosses service users.
+3. Treat one real delivery as the maximum normal validation budget. Any second delivery attempt needs a new explicit reason, not just "the notification did not appear yet."
+4. Diagnose provider receipt/client subscription separately from Hermes delivery. If the transport returned success, inspect provider history/subscription/client state before resending.
+5. Keep timers disabled until both paths are proven: one successful manual send writes success state, then a second manual start skips before contacting the provider.
+6. Never print capability topics, URLs, tokens, or payload secrets in handoff output. If a capability topic was surfaced, rotate before durable use.
+7. Failed sends must not write `last_success`; skipped sends should exit 0 and make clear that no provider call was made.
+
 First ntfy live-send validation at commit `f642acb` is PASS after corrected receipt diagnosis: one manual send returned `Result=success`, `ExecMainCode=0`, `ExecMainStatus=0`, and the service journal showed `Transport: ntfy` plus `Delivery status: HTTP 200`; no topic was printed and no Phase 2 timer existed. The message appeared in ntfy history/UI with the expected `Hermes node brief` title and the bounded daily-brief payload. The initial "not received" report was caused by manually copying a subscription URL from wrapped terminal output and truncating the final two topic characters, not by Hermes service code, node networking, or ntfy publish failure.
 
 Because ntfy topics are capability secrets and the validation topic was surfaced in operator handoff output, continue treating the topic as secret and rotate to a fresh high-entropy topic before any durable delivery setup.
