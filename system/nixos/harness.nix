@@ -106,6 +106,13 @@ let
       exit 1
     '';
   };
+  validateFoundryActionRoutingFixture = pkgs.writeShellApplication {
+    name = "hermes-validate-foundry-action-routing-fixture";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_action_routing_fixture.py /var/lib/hermes/reports/evolution/action-routing-fixture
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -155,6 +162,8 @@ in
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/delivery/state/alerts
     '';
   };
+
+  environment.systemPackages = [ ackCriticalAlert ];
 
   systemd.services.hermes-node-health-watchdog = {
     description = "Hermes node Phase 1 local health watchdog";
@@ -249,6 +258,18 @@ in
       ExecStart = "${provisionFoundryCheckout}/bin/hermes-provision-foundry-checkout";
       ReadWritePaths = lib.mkForce [ "/var/lib/hermes/foundry" ];
       ReadOnlyPaths = lib.mkForce [ ];
+    };
+  };
+
+  systemd.services.hermes-validate-foundry-action-routing-fixture = {
+    description = "Validate Foundry action-routing fixture output boundaries";
+    after = [ "hermes-evolution-foundry-action-routing-fixture.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${validateFoundryActionRoutingFixture}/bin/hermes-validate-foundry-action-routing-fixture";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution"
+      ];
     };
   };
 

@@ -882,6 +882,7 @@ def test_static_nixos_harness_contract() -> None:
     assert 'ReadWritePaths = lib.mkForce [ "/var/lib/hermes/delivery/state/alerts" ];' in harness_nix
     assert "hermes-ack-critical-alert" in harness_nix
     assert "ack_critical_alert.py --state-dir" in harness_nix
+    assert "environment.systemPackages = [ ackCriticalAlert ]" in harness_nix
     assert "systemd.timers.hermes-phase2-critical-alert" not in harness_nix
     assert "users.users.hermes-delivery" in harness_nix
     assert "system.activationScripts.hermesHarnessDirectories" in harness_nix
