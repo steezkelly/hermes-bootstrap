@@ -210,6 +210,19 @@ let
       exec ${python}/bin/python3 ${harnessDir}/validate_foundry_real_trace_ingestion.py /var/lib/hermes/reports/evolution/real-trace-ingestion
     '';
   };
+  sessionEndIngest = pkgs.writeShellApplication {
+    name = "hermes-session-end-ingest";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      export HERMES_HOME=/var/lib/hermes/.hermes
+      export HOME=/var/lib/hermes
+      exec ${python}/bin/python3 ${harnessDir}/export_and_ingest_last_session.py \
+        --hermes-bin /run/current-system/sw/bin/hermes \
+        --python-bin ${python}/bin/python3 \
+        --foundry-repo /var/lib/hermes/foundry/hermes-agent-self-evolution \
+        --out /var/lib/hermes/reports/evolution/session-end-ingest
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -478,6 +491,23 @@ in
       ReadWritePaths = lib.mkForce [ ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/reports/evolution"
+      ];
+    };
+  };
+
+  systemd.services.hermes-session-end-ingest = {
+    description = "Export latest Hermes session and ingest it through Foundry manually";
+    after = [ "hermes-agent.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${sessionEndIngest}/bin/hermes-session-end-ingest";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+        "/var/lib/hermes/.hermes/sessions"
+      ];
+      InaccessiblePaths = lib.mkForce [
+        "-/var/lib/hermes/secrets"
+        "-/var/lib/hermes/.hermes/.env"
       ];
     };
   };

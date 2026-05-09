@@ -146,3 +146,43 @@ hermes-promote-foundry-fixture /var/lib/hermes/reports/evolution/action-routing-
 ```
 
 Reads the manifest to validate safety gates (external_writes_allowed=false, review_required=true), then outputs a `gh pr create --draft` command. Never executes — operator must copy and paste explicitly.
+
+## Real-trace and session-end ingestion
+
+Manual real-trace ingestion remains available for operator-selected exports:
+
+```bash
+hermes sessions export /tmp/export.jsonl
+REAL_TRACE_SOURCE=/tmp/export.jsonl \
+  systemctl start hermes-evolution-foundry-real-trace-ingestion.service
+systemctl start hermes-validate-foundry-real-trace-ingestion.service
+```
+
+The session-complete hook target is also default-off/manual-only. It is a
+single command/service that exports the latest Hermes session to a private temp
+JSONL, validates that JSONL, invokes Foundry's real-trace ingestion path with
+`--no-network --no-external-writes`, and validates that the generated
+`run_report.json` keeps `external_writes_allowed=false`.
+
+```bash
+# Hook/command form, for a manually configured session-complete hook:
+hermes-session-end-ingest
+
+# Equivalent manual NixOS service invocation:
+systemctl start hermes-session-end-ingest.service
+```
+
+Output is written under:
+
+```text
+/var/lib/hermes/reports/evolution/session-end-ingest
+```
+
+Safety boundary:
+
+- no timer is defined
+- no `wantedBy` auto-start target is defined
+- no network, GitHub, or credential environment file is used
+- `/var/lib/hermes/foundry` and `/var/lib/hermes/.hermes/sessions` are read-only
+- `/var/lib/hermes/reports/evolution` is the only persistent write path
+- `/var/lib/hermes/secrets` and `/var/lib/hermes/.hermes/.env` are inaccessible
