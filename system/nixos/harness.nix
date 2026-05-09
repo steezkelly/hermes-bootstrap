@@ -45,6 +45,19 @@ let
       exec ${python}/bin/python3 ${harnessDir}/send_delivery_brief.py --base ${harnessBase} --transport ntfy --state-dir ${harnessBase}/delivery/state --once-per-date --min-interval-seconds 82800
     '';
   };
+  foundryActionRoutingFixture = pkgs.writeShellApplication {
+    name = "hermes-evolution-foundry-action-routing-fixture";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
+      if [ ! -d "$foundry_repo/evolution" ]; then
+        echo "Foundry repo missing: $foundry_repo" >&2
+        exit 1
+      fi
+      cd "$foundry_repo"
+      exec ${python}/bin/python3 -m evolution.core.action_routing_demo --out /var/lib/hermes/reports/evolution/action-routing-fixture --mode fixture --no-network --no-external-writes
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -87,6 +100,8 @@ in
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/events
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/daily
+      ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/evolution
+      ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2750 /var/lib/hermes/foundry
       ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2750 /var/lib/hermes/delivery
       ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2770 /var/lib/hermes/delivery/state
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/delivery/state/alerts
@@ -163,6 +178,19 @@ in
         "/var/lib/hermes/reports"
         "/var/lib/hermes/delivery"
       ];
+    };
+  };
+
+  systemd.services.hermes-evolution-foundry-action-routing-fixture = {
+    description = "Run Agent Evolution Foundry action-routing fixture manually";
+    after = [ "hermes-agent.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${foundryActionRoutingFixture}/bin/hermes-evolution-foundry-action-routing-fixture";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+      ];
+      InaccessiblePaths = lib.mkForce [ "-/var/lib/hermes/secrets" ];
     };
   };
 
