@@ -128,6 +128,9 @@ systemctl start hermes-validate-foundry-action-routing-fixture.service
 
 # 3a. Run the session-import fixture
 systemctl start hermes-evolution-foundry-session-import-fixture.service
+
+# 3b. Validate the session-import fixture
+systemctl start hermes-validate-foundry-session-import-fixture.service
 ```
 
 See `foundry-dry-run-wrapper.md` for the action-routing fixture details.
