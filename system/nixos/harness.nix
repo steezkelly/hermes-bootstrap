@@ -297,6 +297,24 @@ let
         --out /var/lib/hermes/reports/evolution/session-end-ingest
     '';
   };
+  foundryTraceOptimizer = pkgs.writeShellApplication {
+    name = "hermes-evolution-foundry-trace-optimizer";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/../repos/steezkelly-hermes-agent-self-evolution/evolution/core/trace_optimizer.py \
+        --eval-examples /var/lib/hermes/reports/evolution/session-end-ingest/real_trace_ingestion/eval_examples.json \
+        --out /var/lib/hermes/reports/evolution/trace-optimizer \
+        --mode optimizer \
+        --no-network --no-external-writes
+    '';
+  };
+  validateFoundryTraceOptimizer = pkgs.writeShellApplication {
+    name = "hermes-validate-foundry-trace-optimizer";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_trace_optimizer.py /var/lib/hermes/reports/evolution/trace-optimizer
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -639,6 +657,35 @@ in
       InaccessiblePaths = lib.mkForce [
         "-/var/lib/hermes/secrets"
         "-/var/lib/hermes/.hermes/.env"
+      ];
+    };
+  };
+
+  systemd.services.hermes-evolution-foundry-trace-optimizer = {
+    description = "Run deterministic trace optimizer over ingestion eval examples";
+    after = [ "hermes-session-end-ingest.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${foundryTraceOptimizer}/bin/hermes-evolution-foundry-trace-optimizer";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution/trace-optimizer" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+        "/var/lib/hermes/reports/evolution/session-end-ingest"
+      ];
+      InaccessiblePaths = lib.mkForce [
+        "-/var/lib/hermes/secrets"
+        "-/var/lib/hermes/.hermes/.env"
+      ];
+    };
+  };
+
+  systemd.services.hermes-validate-foundry-trace-optimizer = {
+    description = "Validate Foundry trace-optimizer output boundaries";
+    after = [ "hermes-evolution-foundry-trace-optimizer.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${validateFoundryTraceOptimizer}/bin/hermes-validate-foundry-trace-optimizer";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution/trace-optimizer"
       ];
     };
   };
