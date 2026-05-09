@@ -3,7 +3,7 @@
 let
   python = pkgs.python3;
   deployment = import ./deployment-options.nix;
-  harnessDir = ../../scripts/harness;
+  harnessDir = if builtins.pathExists ./harness-scripts then ./harness-scripts else ../../scripts/harness;
   harnessBase = "/var/lib/hermes";
   watchdog = pkgs.writeShellApplication {
     name = "hermes-node-health-watchdog";
