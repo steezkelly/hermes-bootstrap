@@ -224,7 +224,7 @@ The next code change should not add credentials directly to the existing Hermes 
 3. SMTP on the node: add msmtp or equivalent plus a dedicated SMTP credential/config file.
 4. Hermes gateway bridge: treat it as a platform-message path, not email, and design an explicit node-to-gateway API/auth boundary.
 
-Until ntfy receipt and dedupe/rate-limit state are live-validated, `hermes-phase2-delivery-brief-send.service` should remain manual-only and no timer should be added.
+After ntfy receipt and dedupe/rate-limit state are live-validated, the scheduled delivery path may be represented in NixOS, but the timer must remain disabled by default. `deployment-options.nix` exposes `phase2DeliveryTimerEnabled = false` and `phase2DeliveryTimerCalendar = "*-*-* 06:10:00"`; flipping the boolean is an explicit operator decision because it creates an automatic external-send path.
 
 ## Open design questions
 

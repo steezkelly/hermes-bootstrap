@@ -2,6 +2,7 @@
 
 let
   python = pkgs.python3;
+  deployment = import ./deployment-options.nix;
   harnessDir = if builtins.pathExists ./harness-scripts then ./harness-scripts else ../../scripts/harness;
   harnessBase = "/var/lib/hermes";
   watchdog = pkgs.writeShellApplication {
@@ -151,6 +152,17 @@ in
       AccuracySec = "5min";
       Persistent = true;
       Unit = "hermes-daily-local-brief.service";
+    };
+  };
+
+  systemd.timers.hermes-phase2-delivery-brief-send = lib.mkIf deployment.phase2DeliveryTimerEnabled {
+    description = "Send Hermes Phase 2 delivery brief on the configured schedule";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = deployment.phase2DeliveryTimerCalendar;
+      AccuracySec = "5min";
+      Persistent = true;
+      Unit = "hermes-phase2-delivery-brief-send.service";
     };
   };
 }

@@ -50,4 +50,9 @@
   timeZone = "UTC";
   locale = "en_US.UTF-8";
   secretsEnvFile = "/var/lib/hermes/secrets/hermes.env";
+
+  # Phase 2 delivery scheduler. Default stays false even after manual ntfy
+  # delivery validation: enabling this creates an automatic daily send path.
+  phase2DeliveryTimerEnabled = false;
+  phase2DeliveryTimerCalendar = "*-*-* 06:10:00";
 }

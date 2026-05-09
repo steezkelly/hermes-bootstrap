@@ -496,6 +496,7 @@ def test_static_phase2_delivery_contract() -> None:
 def test_static_nixos_harness_contract() -> None:
     harness_nix = (REPO_ROOT / "system" / "nixos" / "harness.nix").read_text()
     flake_nix = (REPO_ROOT / "system" / "nixos" / "flake.nix").read_text()
+    deployment_nix = (REPO_ROOT / "system" / "nixos" / "deployment-options.nix").read_text()
 
     assert "users.users.hermes-harness" in harness_nix
     assert "isSystemUser = true;" in harness_nix
@@ -531,6 +532,11 @@ def test_static_nixos_harness_contract() -> None:
     assert "ReadWritePaths = lib.mkForce [ \"/var/lib/hermes/delivery/state\" ];" in harness_nix
     assert "User = \"hermes-delivery\";" in harness_nix
     assert "InaccessiblePaths = [ \"-/var/lib/hermes/secrets\" ];" in harness_nix
-    assert "systemd.timers.hermes-phase2-delivery-brief" not in harness_nix
+    assert 'phase2DeliveryTimerEnabled = false;' in deployment_nix
+    assert 'phase2DeliveryTimerCalendar = "*-*-* 06:10:00";' in deployment_nix
+    assert "deployment = import ./deployment-options.nix;" in harness_nix
+    assert "systemd.timers.hermes-phase2-delivery-brief-send = lib.mkIf deployment.phase2DeliveryTimerEnabled" in harness_nix
+    assert "OnCalendar = deployment.phase2DeliveryTimerCalendar;" in harness_nix
+    assert "Unit = \"hermes-phase2-delivery-brief-send.service\";" in harness_nix
     assert "wantedBy = [ \"timers.target\" ];" in harness_nix
     assert "./harness.nix" in flake_nix
