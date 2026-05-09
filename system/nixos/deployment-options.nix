@@ -55,4 +55,10 @@
   # delivery validation: enabling this creates an automatic daily send path.
   phase2DeliveryTimerEnabled = false;
   phase2DeliveryTimerCalendar = "*-*-* 06:10:00";
+
+  # Evolution Foundry weekly dry-run timer. Default false — no automatic
+  # fixture runs, no mutation. Enabling schedules a local-only dry-run
+  # pipeline (provision -> fixtures -> validators) once weekly.
+  evolutionFoundryTimerEnabled = false;
+  evolutionFoundryTimerCalendar = "Sat *-*-* 03:00:00";
 }
