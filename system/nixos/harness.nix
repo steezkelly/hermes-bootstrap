@@ -37,6 +37,14 @@ let
       exec ${python}/bin/python3 ${harnessDir}/render_critical_alerts.py --base ${harnessBase} --state-dir ${harnessBase}/delivery/state/alerts --dry-run
     '';
   };
+  ackCriticalAlert = pkgs.writeShellApplication {
+    name = "hermes-ack-critical-alert";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      export PYTHONPATH=${harnessDir}:''${PYTHONPATH:-}
+      exec ${python}/bin/python3 ${harnessDir}/ack_critical_alert.py --state-dir ${harnessBase}/delivery/state/alerts "$@"
+    '';
+  };
   phase2DeliverySend = pkgs.writeShellApplication {
     name = "hermes-phase2-delivery-brief-send";
     runtimeInputs = [ python pkgs.coreutils ];

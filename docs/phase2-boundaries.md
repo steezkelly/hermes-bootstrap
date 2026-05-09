@@ -244,11 +244,10 @@ Live no-send validation passed on the mini-PC at commit `8f938d3`: after applyin
 Operators can acknowledge an existing local critical-alert state record without editing JSON by running:
 
 ```bash
-sudo -u hermes-harness /run/current-system/sw/bin/python3 \
-  /etc/nixos/harness-scripts/ack_critical_alert.py \
-  --state-dir /var/lib/hermes/delivery/state/alerts \
-  --event-id <existing-critical-event-id>
+sudo -u hermes-harness /run/current-system/sw/bin/hermes-ack-critical-alert --event-id <existing-critical-event-id>
 ```
+
+This is the Nix-wired `ackCriticalAlert` writeShellApplication at `/run/current-system/sw/bin/hermes-ack-critical-alert`. It wraps `ack_critical_alert.py` with `PYTHONPATH` and `--state-dir` pre-set to `/var/lib/hermes/delivery/state/alerts`, so the operator only provides `--event-id` and optional `--acknowledged-at` / `--acknowledged-by`. The binary runs as `hermes-harness` and only mutates `critical-alert-state.json`.
 
 `ack_critical_alert.py` only mutates `critical-alert-state.json`. It rejects missing event ids by default, records `acknowledged=true`, `acknowledged_at`, `acknowledged_by`, and keeps summaries, details, comments, raw payloads, journals, topics, URLs, tokens, and delivery credentials out of state. A later renderer run reports the matching condition as `[acknowledged]`.
 

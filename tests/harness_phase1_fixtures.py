@@ -880,6 +880,8 @@ def test_static_nixos_harness_contract() -> None:
     assert "--state-dir ${harnessBase}/delivery/state/alerts" in harness_nix
     assert "install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/delivery/state/alerts" in harness_nix
     assert 'ReadWritePaths = lib.mkForce [ "/var/lib/hermes/delivery/state/alerts" ];' in harness_nix
+    assert "hermes-ack-critical-alert" in harness_nix
+    assert "ack_critical_alert.py --state-dir" in harness_nix
     assert "systemd.timers.hermes-phase2-critical-alert" not in harness_nix
     assert "users.users.hermes-delivery" in harness_nix
     assert "system.activationScripts.hermesHarnessDirectories" in harness_nix
