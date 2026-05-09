@@ -165,10 +165,11 @@ nix eval ./system/nixos#nixosConfigurations.hermes.config.system.build.toplevel.
 # Bundle a local hermes-agent checkout if you want an offline/local-source install.
 ./scripts/setup-hermes-agent.sh --copy /path/to/hermes-agent
 
-# Review hardening, Phase 2 delivery, and Symbiosis assimilation notes before touching hardware.
+# Review hardening, Phase 2 delivery, Symbiosis assimilation, and Foundry wrapper notes before touching hardware.
 less docs/hardening-runbook.md
 less docs/phase2-boundaries.md
 less docs/symbiosis-assimilation.md
+less docs/foundry-dry-run-wrapper.md
 ```
 
 ## Deployment paths
