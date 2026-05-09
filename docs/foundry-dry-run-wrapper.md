@@ -189,6 +189,55 @@ Safety boundary:
 - `/var/lib/hermes/reports/evolution/attention-router-bridge` is the only persistent write path
 - `/var/lib/hermes/secrets` is inaccessible
 
+## Pipeline runner
+
+The manual pipeline runner wraps Foundry's `evolution.core.pipeline_runner` and
+aggregates fixture or real-trace child reports into one `pipeline_run.json`.
+Bootstrap does not judge the pipeline verdict or child verdicts; it only invokes
+Foundry with the local-only safety flags and validates the mechanical boundary.
+
+Fixture mode is the default:
+
+```bash
+systemctl start hermes-evolution-foundry-pipeline-runner.service
+systemctl start hermes-validate-foundry-pipeline-runner.service
+```
+
+Real-trace mode requires an operator-selected exported session JSONL:
+
+```bash
+hermes sessions export /tmp/export.jsonl
+FOUNDRY_PIPELINE_MODE=real_trace \
+FOUNDRY_PIPELINE_TRACE=/tmp/export.jsonl \
+  systemctl start hermes-evolution-foundry-pipeline-runner.service
+systemctl start hermes-validate-foundry-pipeline-runner.service
+```
+
+Output is written under:
+
+```text
+/var/lib/hermes/reports/evolution/pipeline-runner
+```
+
+Expected top-level artifact:
+
+- `pipeline_run.json`
+
+The validator checks that `pipeline_run.json` parses, `schema_version >= 1`,
+`external_writes_allowed=false`, child reports are present as an array
+(`child_reports`, with Foundry #17's `reports` accepted as the concrete alias),
+and the safety block denies network, external writes, GitHub writes, and
+production mutation. It does not evaluate verdict correctness.
+
+Safety boundary:
+
+- no timer is defined
+- no `wantedBy` auto-start target is defined
+- no network, GitHub, or credential environment file is used
+- `/var/lib/hermes/foundry` and `/var/lib/hermes/.hermes/sessions` are read-only
+- `/var/lib/hermes/reports/evolution/pipeline-runner` is the only persistent write path
+- `/var/lib/hermes/secrets` and `/var/lib/hermes/.hermes/.env` are inaccessible
+
 ## Real-trace and session-end ingestion
 
 Manual real-trace ingestion remains available for operator-selected exports:

@@ -235,6 +235,55 @@ let
       exec ${python}/bin/python3 ${harnessDir}/validate_foundry_attention_router_bridge.py /var/lib/hermes/reports/evolution/attention-router-bridge
     '';
   };
+  foundryPipelineRunner = pkgs.writeShellApplication {
+    name = "hermes-evolution-foundry-pipeline-runner";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
+      if [ ! -d "$foundry_repo/evolution" ]; then
+        echo "Foundry repo missing: $foundry_repo" >&2
+        exit 1
+      fi
+
+      mode="''${FOUNDRY_PIPELINE_MODE:-fixture}"
+      trace="''${FOUNDRY_PIPELINE_TRACE:-}"
+      case "$mode" in
+        fixture|real_trace) ;;
+        *)
+          echo "Unsupported FOUNDRY_PIPELINE_MODE: $mode (expected fixture|real_trace)" >&2
+          exit 1
+          ;;
+      esac
+
+      args=(
+        --out /var/lib/hermes/reports/evolution/pipeline-runner
+        --mode "$mode"
+        --no-network
+        --no-external-writes
+      )
+      if [ "$mode" = "real_trace" ]; then
+        if [ -z "$trace" ]; then
+          echo "FOUNDRY_PIPELINE_TRACE is required when FOUNDRY_PIPELINE_MODE=real_trace" >&2
+          exit 1
+        fi
+        if [ ! -f "$trace" ]; then
+          echo "Trace file not found: $trace" >&2
+          exit 1
+        fi
+        args+=(--trace "$trace")
+      fi
+
+      cd "$foundry_repo"
+      exec ${python}/bin/python3 -m evolution.core.pipeline_runner "''${args[@]}"
+    '';
+  };
+  validateFoundryPipelineRunner = pkgs.writeShellApplication {
+    name = "hermes-validate-foundry-pipeline-runner";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_pipeline_runner.py /var/lib/hermes/reports/evolution/pipeline-runner
+    '';
+  };
   sessionEndIngest = pkgs.writeShellApplication {
     name = "hermes-session-end-ingest";
     runtimeInputs = [ python pkgs.coreutils ];
@@ -292,6 +341,7 @@ in
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/daily
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/evolution
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/evolution/attention-router-bridge
+      ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/evolution/pipeline-runner
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2750 /var/lib/hermes/foundry
       ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2750 /var/lib/hermes/delivery
       ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2770 /var/lib/hermes/delivery/state
@@ -543,6 +593,35 @@ in
       ReadWritePaths = lib.mkForce [ ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/reports/evolution/attention-router-bridge"
+      ];
+    };
+  };
+
+  systemd.services.hermes-evolution-foundry-pipeline-runner = {
+    description = "Run the Foundry fixture or real-trace pipeline runner manually";
+    after = [ "hermes-agent.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${foundryPipelineRunner}/bin/hermes-evolution-foundry-pipeline-runner";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution/pipeline-runner" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+        "/var/lib/hermes/.hermes/sessions"
+      ];
+      InaccessiblePaths = lib.mkForce [
+        "-/var/lib/hermes/secrets"
+        "-/var/lib/hermes/.hermes/.env"
+      ];
+    };
+  };
+
+  systemd.services.hermes-validate-foundry-pipeline-runner = {
+    description = "Validate Foundry pipeline-runner output boundaries";
+    after = [ "hermes-evolution-foundry-pipeline-runner.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${validateFoundryPipelineRunner}/bin/hermes-validate-foundry-pipeline-runner";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution/pipeline-runner"
       ];
     };
   };
