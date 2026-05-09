@@ -113,6 +113,13 @@ let
       exec ${python}/bin/python3 ${harnessDir}/validate_foundry_action_routing_fixture.py /var/lib/hermes/reports/evolution/action-routing-fixture
     '';
   };
+  validateFoundrySessionImportFixture = pkgs.writeShellApplication {
+    name = "hermes-validate-foundry-session-import-fixture";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_session_import_fixture.py /var/lib/hermes/reports/evolution/session-import-fixture
+    '';
+  };
   foundrySessionImportFixture = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-session-import-fixture";
     runtimeInputs = [ python pkgs.coreutils ];
@@ -296,6 +303,18 @@ in
         "/var/lib/hermes/foundry"
       ];
       InaccessiblePaths = lib.mkForce [ "-/var/lib/hermes/secrets" ];
+    };
+  };
+
+  systemd.services.hermes-validate-foundry-session-import-fixture = {
+    description = "Validate Foundry session-import fixture output boundaries";
+    after = [ "hermes-evolution-foundry-session-import-fixture.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${validateFoundrySessionImportFixture}/bin/hermes-validate-foundry-session-import-fixture";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution"
+      ];
     };
   };
 
