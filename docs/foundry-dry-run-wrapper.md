@@ -147,6 +147,48 @@ hermes-promote-foundry-fixture /var/lib/hermes/reports/evolution/action-routing-
 
 Reads the manifest to validate safety gates (external_writes_allowed=false, review_required=true), then outputs a `gh pr create --draft` command. Never executes — operator must copy and paste explicitly.
 
+## Attention-router bridge
+
+After real-trace ingestion has generated a detection report, the manual
+attention-router bridge converts detected failure classes into Steve-facing
+action items. Bootstrap only invokes Foundry and validates file/safety
+boundaries; Foundry owns routing semantics, bucket choice, prompt wording, and
+promotion dossier content.
+
+```bash
+# 1. Ingest a real trace first
+REAL_TRACE_SOURCE=/tmp/export.jsonl \
+  systemctl start hermes-evolution-foundry-real-trace-ingestion.service
+systemctl start hermes-validate-foundry-real-trace-ingestion.service
+
+# 2. Convert the real-trace detections into action-router artifacts
+systemctl start hermes-evolution-foundry-attention-router-bridge.service
+systemctl start hermes-validate-foundry-attention-router-bridge.service
+```
+
+Output is written under:
+
+```text
+/var/lib/hermes/reports/evolution/attention-router-bridge
+```
+
+Expected artifacts:
+
+- `run_report.json`
+- `action_queue.json`
+- `promotion_dossier.md`
+- `artifact_manifest.json`
+
+Safety boundary:
+
+- no timer is defined
+- no `wantedBy` auto-start target is defined
+- no network, GitHub, or credential environment file is used
+- `/var/lib/hermes/foundry` is read-only
+- `/var/lib/hermes/reports/evolution/real-trace-ingestion` is read-only input
+- `/var/lib/hermes/reports/evolution/attention-router-bridge` is the only persistent write path
+- `/var/lib/hermes/secrets` is inaccessible
+
 ## Real-trace and session-end ingestion
 
 Manual real-trace ingestion remains available for operator-selected exports:

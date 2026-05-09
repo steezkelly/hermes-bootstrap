@@ -210,6 +210,31 @@ let
       exec ${python}/bin/python3 ${harnessDir}/validate_foundry_real_trace_ingestion.py /var/lib/hermes/reports/evolution/real-trace-ingestion
     '';
   };
+  foundryAttentionRouterBridge = pkgs.writeShellApplication {
+    name = "hermes-evolution-foundry-attention-router-bridge";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
+      if [ ! -d "$foundry_repo/evolution" ]; then
+        echo "Foundry repo missing: $foundry_repo" >&2
+        exit 1
+      fi
+      input=/var/lib/hermes/reports/evolution/real-trace-ingestion
+      if [ ! -f "$input/run_report.json" ]; then
+        echo "Real-trace ingestion report missing: $input/run_report.json" >&2
+        exit 1
+      fi
+      cd "$foundry_repo"
+      exec ${python}/bin/python3 -m evolution.core.attention_router_bridge --input /var/lib/hermes/reports/evolution/real-trace-ingestion --out /var/lib/hermes/reports/evolution/attention-router-bridge --mode attention_router_bridge --no-network --no-external-writes
+    '';
+  };
+  validateFoundryAttentionRouterBridge = pkgs.writeShellApplication {
+    name = "hermes-validate-foundry-attention-router-bridge";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_attention_router_bridge.py /var/lib/hermes/reports/evolution/attention-router-bridge
+    '';
+  };
   sessionEndIngest = pkgs.writeShellApplication {
     name = "hermes-session-end-ingest";
     runtimeInputs = [ python pkgs.coreutils ];
@@ -266,6 +291,7 @@ in
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/daily
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/evolution
+      ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/evolution/attention-router-bridge
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2750 /var/lib/hermes/foundry
       ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2750 /var/lib/hermes/delivery
       ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2770 /var/lib/hermes/delivery/state
@@ -491,6 +517,32 @@ in
       ReadWritePaths = lib.mkForce [ ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/reports/evolution"
+      ];
+    };
+  };
+
+  systemd.services.hermes-evolution-foundry-attention-router-bridge = {
+    description = "Convert Foundry real-trace detections into action-router items manually";
+    after = [ "hermes-evolution-foundry-real-trace-ingestion.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${foundryAttentionRouterBridge}/bin/hermes-evolution-foundry-attention-router-bridge";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution/attention-router-bridge" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+        "/var/lib/hermes/reports/evolution/real-trace-ingestion"
+      ];
+      InaccessiblePaths = lib.mkForce [ "-/var/lib/hermes/secrets" ];
+    };
+  };
+
+  systemd.services.hermes-validate-foundry-attention-router-bridge = {
+    description = "Validate Foundry attention-router bridge output boundaries";
+    after = [ "hermes-evolution-foundry-attention-router-bridge.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${validateFoundryAttentionRouterBridge}/bin/hermes-validate-foundry-attention-router-bridge";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution/attention-router-bridge"
       ];
     };
   };
