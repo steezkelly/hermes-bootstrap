@@ -173,6 +173,13 @@ let
       exec ${python}/bin/python3 ${harnessDir}/validate_foundry_skill_drift_fixture.py /var/lib/hermes/reports/evolution/skill-drift-fixture
     '';
   };
+  promoteFoundryFixture = pkgs.writeShellApplication {
+    name = "hermes-promote-foundry-fixture";
+    runtimeInputs = [ python pkgs.coreutils pkgs.git pkgs.gh ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/promote_foundry_fixture.py "$@"
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";

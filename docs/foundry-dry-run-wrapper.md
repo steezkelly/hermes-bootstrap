@@ -135,4 +135,14 @@ systemctl start hermes-validate-foundry-session-import-fixture.service
 
 See `foundry-dry-run-wrapper.md` for the action-routing fixture details.
 
+## Manual promotion path
+
+After reviewing a fixture's evidence, generate a ready-to-paste gh command:
+
+```bash
+hermes-promote-foundry-fixture /var/lib/hermes/reports/evolution/action-routing-fixture
+```
+
+This reads the artifact_manifest.json and promotion_dossier.md, validates safety gates, and outputs a gh pr create command. It never executes — the operator must copy and paste explicitly.
+
 Do not add bootstrap-side renderers for evidence, queue items, gate verdicts, or promotion dossiers.
