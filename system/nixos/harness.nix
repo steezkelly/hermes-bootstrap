@@ -29,6 +29,14 @@ let
       exec ${python}/bin/python3 ${harnessDir}/render_delivery_brief.py --base ${harnessBase} --dry-run
     '';
   };
+  phase2CriticalAlertDryRun = pkgs.writeShellApplication {
+    name = "hermes-phase2-critical-alert-dry-run";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      export PYTHONPATH=${harnessDir}:''${PYTHONPATH:-}
+      exec ${python}/bin/python3 ${harnessDir}/render_critical_alerts.py --base ${harnessBase} --dry-run
+    '';
+  };
   phase2DeliverySend = pkgs.writeShellApplication {
     name = "hermes-phase2-delivery-brief-send";
     runtimeInputs = [ python pkgs.coreutils ];
@@ -121,6 +129,19 @@ in
         "/var/lib/hermes/harness"
         "/var/lib/hermes/events"
         "/var/lib/hermes/reports"
+      ];
+    };
+  };
+
+  systemd.services.hermes-phase2-critical-alert-dry-run = {
+    description = "Render Hermes Phase 2 critical alert candidates dry-run";
+    after = [ "hermes-node-health-watchdog.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${phase2CriticalAlertDryRun}/bin/hermes-phase2-critical-alert-dry-run";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/harness"
+        "/var/lib/hermes/events"
       ];
     };
   };

@@ -274,6 +274,87 @@ def test_phase2_delivery_brief_is_bounded(tmp_path: Path) -> None:
     assert "inspect the local source paths" in out
 
 
+def test_phase2_critical_alert_candidates_are_local_redacted_and_bounded(tmp_path: Path) -> None:
+    load_module("harness_common")
+    alerts = load_module("render_critical_alerts")
+
+    (tmp_path / "harness").mkdir()
+    (tmp_path / "events").mkdir()
+    (tmp_path / "reports" / "daily").mkdir(parents=True)
+    (tmp_path / "harness" / "latest-sensors.json").write_text(json.dumps({"overall_status": "critical", "sensors": []}))
+    (tmp_path / "events" / "events.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "time": "2026-05-06T07:00:00Z",
+                        "id": "hermes.state.cron.permission-regression",
+                        "status": "critical",
+                        "summary": "Cron path regressed token=secret-value",
+                        "reason": "first_seen",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "time": "2026-05-06T07:30:00Z",
+                        "id": "release.nixos24_05.unsupported",
+                        "status": "warning",
+                        "summary": "NixOS 24.05 unsupported",
+                        "reason": "first_seen",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "time": "2026-05-06T08:00:00Z",
+                        "id": "hermes.state.cron.permission-regression",
+                        "status": "critical",
+                        "summary": "Cron path still regressed token=secret-value",
+                        "reason": "rate_limit_expired",
+                    }
+                ),
+            ]
+        )
+        + "\n"
+    )
+
+    out = alerts.render(tmp_path, date="2026-05-06", max_chars=700)
+
+    assert out.startswith("Hermes critical alert candidates — 2026-05-06")
+    assert "No message was sent." in out
+    assert "hermes.state.cron.permission-regression" in out
+    assert "release.nixos24_05.unsupported" not in out
+    assert "token=[REDACTED]" in out
+    assert "secret-value" not in out
+    assert "/var/lib/hermes/secrets/hermes.env" not in out
+    assert "journalctl" not in out
+    assert len(out) <= 700
+
+
+def test_phase2_critical_alert_candidates_report_quiet_when_no_critical_events(tmp_path: Path) -> None:
+    load_module("harness_common")
+    alerts = load_module("render_critical_alerts")
+
+    (tmp_path / "harness").mkdir()
+    (tmp_path / "events").mkdir()
+    (tmp_path / "harness" / "latest-sensors.json").write_text(json.dumps({"overall_status": "ok", "sensors": []}))
+    (tmp_path / "events" / "events.jsonl").write_text(
+        json.dumps(
+            {
+                "time": "2026-05-06T07:00:00Z",
+                "id": "release.nixos24_05.unsupported",
+                "status": "warning",
+                "summary": "NixOS 24.05 unsupported",
+            }
+        )
+        + "\n"
+    )
+
+    out = alerts.render(tmp_path, date="2026-05-06")
+
+    assert "No critical events for 2026-05-06." in out
+    assert "No message was sent." in out
+
+
 def _write_minimal_phase2_inputs(base: Path, date: str = "2026-05-06") -> None:
     (base / "harness").mkdir()
     (base / "events").mkdir()
@@ -471,6 +552,7 @@ def test_send_delivery_brief_rejects_ntfy_without_topic(tmp_path: Path, capsys: 
 
 def test_static_phase2_delivery_contract() -> None:
     delivery_script = (REPO_ROOT / "scripts" / "harness" / "render_delivery_brief.py").read_text()
+    critical_alert_script = (REPO_ROOT / "scripts" / "harness" / "render_critical_alerts.py").read_text()
     sender_script = (REPO_ROOT / "scripts" / "harness" / "send_delivery_brief.py").read_text()
     phase2_doc = (REPO_ROOT / "docs" / "phase2-boundaries.md").read_text()
 
@@ -490,7 +572,12 @@ def test_static_phase2_delivery_contract() -> None:
     assert "message_sha256" in sender_script
     assert "HERMES_DELIVERY_NTFY_TOPIC" in sender_script
     assert "email transport is not implemented" in sender_script
+    assert "No message was sent." in critical_alert_script
+    assert "events.jsonl" in critical_alert_script
+    assert "/var/lib/hermes/secrets/hermes.env" not in critical_alert_script
+    assert "journalctl" not in critical_alert_script
     assert "local report exists -> delivery renderer builds bounded message" in phase2_doc
+    assert "critical alert candidate renderer" in phase2_doc
 
 
 def test_static_nixos_harness_contract() -> None:
@@ -514,6 +601,10 @@ def test_static_nixos_harness_contract() -> None:
     assert "hermes-phase2-delivery-brief-dry-run" in harness_nix
     assert "Render Hermes Phase 2 delivery brief dry-run" in harness_nix
     assert "render_delivery_brief.py --base" in harness_nix
+    assert "hermes-phase2-critical-alert-dry-run" in harness_nix
+    assert "Render Hermes Phase 2 critical alert candidates dry-run" in harness_nix
+    assert "render_critical_alerts.py --base" in harness_nix
+    assert "systemd.timers.hermes-phase2-critical-alert" not in harness_nix
     assert "users.users.hermes-delivery" in harness_nix
     assert "system.activationScripts.hermesHarnessDirectories" in harness_nix
     assert 'deps = [ "users" ];' in harness_nix

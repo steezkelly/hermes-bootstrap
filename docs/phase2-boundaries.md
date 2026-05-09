@@ -208,6 +208,20 @@ Diagnose receipt separately from Hermes delivery. If ntfy returns HTTP 200 but n
 4. Poll/inspect ntfy history for the topic before resending; history can prove server-side receipt even when push display failed or the client subscribed to a mistyped topic.
 5. If an additional controlled publish is authorized, send a short non-Hermes test message to the same topic or a freshly rotated topic, record whether web/app receives it, then stop again.
 
+## Critical alert candidate renderer
+
+The next bounded-alert step is a local, no-send critical alert candidate renderer, not an always-on urgent sender. `scripts/harness/render_critical_alerts.py` reads only `/var/lib/hermes/events/events.jsonl` and `/var/lib/hermes/harness/latest-sensors.json`, filters for critical events on the selected date, collapses repeated emissions by event id, redacts token-like values, caps output length, and prints explicit local inspect commands.
+
+NixOS wires it as a manual disabled-by-default oneshot named `hermes-phase2-critical-alert-dry-run`. It has no timer, no `wantedBy`, no delivery credentials, no network transport, no writes, and no raw journal export. Operators can start it manually to inspect what would be considered an urgent alert candidate before adding acknowledgement state or any live critical-alert sender.
+
+This preserves the Phase 2 alert order:
+
+```text
+local events exist -> critical alert candidate renderer -> dry-run service -> acknowledgement/dedupe state -> explicit live alert decision -> optional scheduler
+```
+
+Do not wire critical candidates to ntfy/email automatically until there is local acknowledgement state that can distinguish a new unresolved critical condition from a repeated known condition.
+
 ## Credential/transport decision boundary
 
 Discovery found no ready email transport on the desktop or node:
