@@ -2,64 +2,112 @@
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan task-by-task.
 
-**Goal:** Build a safe, reproducible appliance pipeline where hermes-bootstrap runs Hermes Agent as the self-owned runtime habitat and integrates Agent Evolution Foundry as the auditable evidence/evolution loop.
+**Goal:** Keep hermes-bootstrap as the safe, reproducible appliance substrate for running Agent Evolution Foundry, without moving Foundry business logic into the bootstrap repo.
 
-**Architecture:** Hermes Agent remains the runtime/organism. Agent Evolution Foundry remains the crucible that mines traces, builds evals, evolves artifacts, and gates promotion. hermes-bootstrap owns the appliance substrate: NixOS services, local-only evidence contracts, disabled-by-default timers, action queue surfaces, and opt-in promotion wiring.
+**Architecture:** Hermes Agent remains the runtime/organism and trace producer. Agent Evolution Foundry remains the trace-to-eval proving ground that normalizes traces, builds evals, tests candidate artifacts, gates regressions, emits action queues, and writes promotion dossiers. hermes-bootstrap owns only the habitat: NixOS wiring, users, permissions, data directories, retention, disabled/default-off services, local invocation, schema-version boundary validation, and fail-closed storage of Foundry outputs.
 
-**Tech Stack:** NixOS modules, systemd services/timers, Python harness scripts, SQLite/JSONL local evidence contracts, pytest + shell static tests, GitHub issues/PRs as promotion surfaces, Hermes Kanban/action queue as Steve-facing execution surface.
+**Tech Stack:** NixOS modules, systemd oneshot services/timers, JSON/JSONL schema validation at repo boundaries, pytest + shell static tests, Foundry CLI invocation, local artifact directories under `/var/lib/hermes` or configured equivalents.
 
 ---
+
+## Decision Memo from Adversarial Review
+
+The deep-research correction is accepted:
+
+> Bootstrap should package and supervise Foundry output, not reimplement Foundry's evidence model.
+
+The smallest compounding loop is:
+
+```text
+one repeated failure -> one eval -> one better artifact -> one measured win -> one manual promotion
+```
+
+This plan intentionally narrows the original roadmap. It removes bootstrap-owned evidence renderers, action ranking policy, promotion dossier rendering, and event-sourced control-plane ambitions from the bootstrap side. Those semantics belong in Foundry.
 
 ## Product North Star
 
-Do not build another briefing system. Build a local action engine.
+Do not build another briefing system. Do not build a report machine about itself.
 
-## External Inspiration: Hermes-Symbiosis
+Build a local, reviewable action path where a repeated failure becomes a measured improvement. Steve-facing output should be a concise action queue with ready-to-paste Hermes prompts, but the queue semantics and wording are Foundry artifacts. bootstrap only stores, validates, and exposes the queue file emitted by Foundry.
 
-Magaav's Hermes-Symbiosis frames a useful adjacent vision: an operating system for humans and agents where coordination, visibility, and resilience merge into a living runtime. Its three-part arc maps cleanly onto this plan:
+## Component Ownership Contract
 
-- Orchestrator coordinates: hermes-bootstrap should coordinate services, timers, evidence, and action queues.
-- Space-UI reveals: our immediate equivalent is not a dashboard-heavy UI; it is a concise action queue plus local evidence artifacts that reveal what needs attention.
-- Mythos persists: our equivalent is the event/evidence spine plus fail-closed repair/promotion loops that continue safely without pretending every failure is recoverable.
+| Component | Owns | Must not absorb |
+|---|---|---|
+| Hermes Agent | Runtime loop, tools, skills, memory, cron, delegation, gateway, MCP, session/trace export, artifact version stamping | Eval construction, optimizer policy, promotion governance |
+| Agent Evolution Foundry | Trace ingestion, normalization, redaction, eval cases, holdouts, candidate artifacts, diagnostics, gates, action queue generation, promotion dossiers, evidence renderer | NixOS module setup, secrets wiring, service supervision, appliance permissions |
+| hermes-bootstrap | NixOS modules, systemd oneshots/timers, users, permissions, repo/output path config, retention, local dry-run invocation, schema-version validation, fail-closed wrappers | Evidence semantics, queue ranking, `next_prompt` authoring, dossier wording, mutation/gate logic |
 
-Difference in emphasis: Symbiosis leans toward a living runtime and spatial cockpit. Agent Evolution Foundry + hermes-bootstrap should lean toward auditable self-improvement: local evidence, deterministic contracts, disabled-by-default services, and reviewable promotion. The useful synthesis is **living system feel, appliance-grade safety**.
+Boundary rule:
 
-Reference: https://github.com/Magaav/hackathon-hermes-symbiosis
+> If a component decides what improvement means, what counts as regression, how action items are ranked, or what text belongs in a promotion dossier, that component is Foundry.
 
-
-The successful system produces a concise queue like:
-
-```json
-{
-  "generated_at": "2026-05-09T00:00:00Z",
-  "buckets": {
-    "needsSteve": [
-      {
-        "title": "Approve Foundry dry-run service promotion",
-        "why": "Fixture evidence passed; external send remains disabled.",
-        "prompt": "Work in /home/steve/hermes-bootstrap. Review the foundry dry-run report at ... and prepare the next gated PR."
-      }
-    ],
-    "autonomous": [],
-    "blocked": [],
-    "stale": []
-  }
-}
-```
-
-Steve should receive recommended work + ready-to-paste Hermes prompts, not another long digest.
-
----
+bootstrap may run it, store it, expose it, and keep it disabled by default. bootstrap should not author those semantics.
 
 ## Non-Negotiable Safety Rules
 
-1. No live external sends in Phases 0-3.
-2. No timers enabled by default.
-3. No GitHub writes from appliance services.
+1. No live external sends from bootstrap Foundry services.
+2. No GitHub writes from bootstrap Foundry services.
+3. No timers enabled by default.
 4. No production skill/config mutation without explicit manual promotion.
-5. Every generated artifact is local, deterministic, and testable first.
-6. Every future PR body must include local evidence paths and commands.
-7. Failure is fail-closed: nonzero exit + actionable log, no partial send.
+5. Fixture and dry-run paths require no credentials.
+6. Foundry artifacts are local first and schema-versioned.
+7. bootstrap validation is boundary validation only: existence, schema version, required top-level fields, local paths, and fail-closed behavior.
+8. Every future PR body must include local verification commands and evidence paths when checks are absent.
+
+## Minimal Artifact Contract
+
+Foundry is the producer of all semantic artifacts. bootstrap is a consumer/wrapper.
+
+| Artifact | Producer | bootstrap responsibility |
+|---|---|---|
+| `traces.jsonl` | Hermes Agent | Provide configured input path and permissions; do not reinterpret trace semantics |
+| `eval_cases.jsonl` | Foundry | Store if emitted; validate schema version only if used by a service boundary |
+| `run_report.json` | Foundry | Require presence after successful dry-run; validate top-level contract |
+| `action_queue.json` | Foundry | Store/surface; validate required fields, expiry, evidence paths, and local-only safety flags |
+| `promotion_dossier.md` | Foundry | Store/surface; do not generate text in bootstrap |
+| `artifact_manifest.json` | Foundry | Pin/rollback support for the appliance wrapper |
+
+Do not add SQLite projections, dashboards, kanban card creation, or automatic PR text generation in bootstrap until one Foundry loop has shown holdout-backed value.
+
+## First Demo Contract
+
+The first demo should prove user value, not artifact volume.
+
+Repeated failure:
+
+```text
+Hermes produces a long strategic briefing when Steve needs one concise action item with owner, evidence path, expiry, and a ready-to-paste next prompt.
+```
+
+Foundry loop:
+
+1. Fixture trace/event captures the failure.
+2. Foundry converts it into an `action_routing` eval case.
+3. Baseline `action_router` artifact fails at least one deterministic assertion.
+4. Candidate `action_router` artifact passes deterministic assertions.
+5. Gate result proves baseline fail + candidate pass with no regressions on fixture/adversarial cases.
+6. Foundry emits:
+   - `run_report.json`
+   - `action_queue.json`
+   - `promotion_dossier.md`
+   - `artifact_manifest.json`
+7. bootstrap manually invokes this Foundry dry-run and stores the outputs locally.
+
+Success is not “three files were generated.” Success is “one repeated failure has a replayable eval, a better artifact, and a manual promotion recommendation backed by evidence.”
+
+## Deferred Until After the First Measured Loop
+
+- bootstrap-owned evidence renderers
+- bootstrap-owned action queue projection/ranking
+- bootstrap-owned promotion dossier rendering
+- event-sourced control plane in bootstrap
+- SQLite projections for this loop
+- kanban card creation from bootstrap services
+- dashboard-heavy surfaces
+- scheduled/default-on Foundry timers
+- autonomous repair or mutation
+- live sends or GitHub writes from services
 
 ---
 
@@ -71,8 +119,7 @@ Steve should receive recommended work + ready-to-paste Hermes prompts, not anoth
 - Modify: `README.md`
 - Modify: `SPEC.md`
 - Create: `docs/agent-evolution-foundry.md`
-- Reference: `docs/phase2-boundaries.md`
-- Test: `tests/shell-syntax.sh` if touched shell appears; otherwise docs sanity only
+- Test: docs sanity only unless shell/Nix files change
 
 ### Task 0.1: Add the vocabulary contract
 
@@ -83,583 +130,286 @@ Add this language to `docs/agent-evolution-foundry.md`:
 ```markdown
 # Agent Evolution Foundry in hermes-bootstrap
 
-Hermes Agent is the runtime/organism: tools, skills, memory, cron, gateway, delegation.
+Hermes Agent is the runtime/organism: tools, skills, memory, cron, gateway, delegation, MCP, and trace export.
 
-Agent Evolution Foundry is the crucible/evidence loop: traces become evals, evals become experiments, experiments become gated upgrades.
+Agent Evolution Foundry is the trace-to-eval proving ground: traces become evals, evals test candidate artifacts, candidates are gated against regressions, and only evidence-backed upgrades are recommended for promotion.
 
-hermes-bootstrap is the habitat/appliance substrate: reproducible NixOS services, local evidence spine, disabled timers, action queues, and opt-in promotion gates.
+hermes-bootstrap is the habitat/appliance substrate: reproducible NixOS wiring, local directories, permissions, disabled/default-off service wrappers, retention, and boundary validation for Foundry outputs.
 ```
 
 **Verification:**
 
 ```bash
-grep -R "Hermes Agent is the runtime" README.md SPEC.md docs/agent-evolution-foundry.md
+grep -R "trace-to-eval proving ground" README.md SPEC.md docs/agent-evolution-foundry.md
 ```
 
 Expected: at least one match in docs and a concise pointer from README/SPEC.
 
-**Commit:**
-
-```bash
-git add README.md SPEC.md docs/agent-evolution-foundry.md
-git commit -m "docs: define Agent Evolution Foundry appliance contract"
-```
-
 ### Task 0.2: Document explicit out-of-scope claims
 
-**Objective:** Prevent hype drift.
+**Objective:** Prevent hype drift and semantic creep.
 
-Add an "Out of scope until proven" section:
+Add an "Out of scope for bootstrap" section:
 
 ```markdown
-## Out of scope until proven
+## Out of scope for bootstrap
 
+- Evidence semantics
+- Eval generation
+- Candidate artifact generation
+- Gate verdict logic
+- Action queue ranking or wording
+- Promotion dossier wording
 - Autonomous production mutation
 - Live delivery from evolution services
-- Claims of general agent self-improvement without holdout evidence
-- Reinforcement learning claims for GEPA/prompt optimization
-- Automatic upstream PR creation
+- Automatic GitHub writes from appliance services
 ```
 
 **Verification:**
 
 ```bash
-grep -n "Out of scope until proven" docs/agent-evolution-foundry.md
+grep -n "Out of scope for bootstrap" docs/agent-evolution-foundry.md
 ```
 
 Expected: section exists.
 
 ---
 
-## Milestone 1: Local Evidence Spine
+## Milestone 1: Foundry CLI Contract Before Appliance Code
 
-**Objective:** Add deterministic local evidence artifacts that can later feed Foundry without requiring live Hermes, credentials, external sends, or GitHub writes.
+**Objective:** Define the CLI/artifact contract that bootstrap will invoke. Implementation of the CLI belongs in Foundry, not bootstrap.
 
 **Files:**
-- Create: `scripts/harness/render_evolution_evidence.py`
-- Create: `tests/test_evolution_evidence.py`
-- Create: `docs/evolution-evidence-contract.md`
+- Create: `docs/foundry-cli-contract.md`
+- Modify: `docs/agent-evolution-foundry.md`
+- Do not create bootstrap evidence/queue/dossier renderer scripts
 
-### Task 1.1: Write fixture evidence schema test
+### Task 1.1: Document the required Foundry command
 
-**Objective:** Specify the local evidence contract first.
+**Objective:** Give bootstrap a stable target without owning semantics.
 
-Create `tests/test_evolution_evidence.py`:
+Create `docs/foundry-cli-contract.md`:
 
-```python
-import json
-import subprocess
-import sys
-from pathlib import Path
+```markdown
+# Foundry CLI Contract for hermes-bootstrap
 
-ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "scripts" / "harness" / "render_evolution_evidence.py"
-
-
-def run_script(tmp_path):
-    output = tmp_path / "evolution-evidence.json"
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT), "--output", str(output), "--fixture"],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=True,
-    )
-    return output, result
-
-
-def test_fixture_evidence_contract(tmp_path):
-    output, result = run_script(tmp_path)
-    assert result.stdout == ""
-    data = json.loads(output.read_text())
-    assert data["schema_version"] == 1
-    assert data["mode"] == "fixture"
-    assert data["external_sends"] == []
-    assert data["github_writes"] == []
-    assert data["promotion_allowed"] is False
-    assert data["source_events"]
-    assert data["candidate_actions"]
-
-
-def test_fixture_evidence_is_deterministic(tmp_path):
-    a, _ = run_script(tmp_path / "a")
-    b, _ = run_script(tmp_path / "b")
-    assert a.read_text() == b.read_text()
-```
-
-**Run:**
+bootstrap expects a Foundry command shaped like:
 
 ```bash
-pytest tests/test_evolution_evidence.py -q
+foundry run action-routing-fixture \
+  --input /path/to/traces.jsonl \
+  --out /var/lib/hermes/reports/evolution/latest \
+  --mode fixture \
+  --no-network \
+  --no-external-writes
 ```
 
-Expected: FAIL because script does not exist.
+On success, Foundry writes:
 
-### Task 1.2: Implement fixture evidence renderer
+- `run_report.json`
+- `action_queue.json`
+- `promotion_dossier.md`
+- `artifact_manifest.json`
 
-**Objective:** Produce deterministic fixture output with no stdout on success.
-
-Create `scripts/harness/render_evolution_evidence.py`:
-
-```python
-#!/usr/bin/env python3
-import argparse
-import json
-from pathlib import Path
-
-
-def build_fixture_evidence():
-    return {
-        "schema_version": 1,
-        "mode": "fixture",
-        "generated_at": "1970-01-01T00:00:00Z",
-        "external_sends": [],
-        "github_writes": [],
-        "promotion_allowed": False,
-        "source_events": [
-            {
-                "event_id": "fixture-session-001",
-                "event_type": "hermes.session.completed",
-                "summary": "Hermes completed a task and produced a reusable correction.",
-            }
-        ],
-        "candidate_actions": [
-            {
-                "bucket": "autonomous",
-                "title": "Generate eval fixture from completed session",
-                "prompt": "Work in Agent Evolution Foundry. Convert fixture-session-001 into a minimal eval example and run local gates only.",
-            }
-        ],
-    }
-
-
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--fixture", action="store_true")
-    args = parser.parse_args()
-
-    if not args.fixture:
-        raise SystemExit("only --fixture mode is implemented")
-
-    output = Path(args.output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(build_fixture_evidence(), indent=2, sort_keys=True) + "\n")
-
-
-if __name__ == "__main__":
-    main()
+On failure, Foundry exits nonzero and writes actionable stderr. bootstrap must not treat partial artifacts as success.
 ```
 
-**Run:**
+**Verification:**
 
 ```bash
-pytest tests/test_evolution_evidence.py -q
-python3 scripts/harness/render_evolution_evidence.py --fixture --output /tmp/evolution-evidence.json
-python3 -m json.tool /tmp/evolution-evidence.json >/dev/null
+grep -n "foundry run action-routing-fixture" docs/foundry-cli-contract.md
 ```
 
-Expected: tests pass; command is quiet on success.
+Expected: command is documented.
 
-**Commit:**
+### Task 1.2: Document the minimal boundary validation
+
+**Objective:** Keep bootstrap validation thin and mechanical.
+
+Add this boundary-validation rule:
+
+```markdown
+bootstrap validates only:
+
+- expected files exist after a successful service run
+- JSON files parse
+- `schema_version` is present and supported
+- `external_writes_allowed` is false for fixture/dry-run mode when present
+- `evidence_paths` point to local files under configured report roots
+- no service timer is enabled by default
+
+bootstrap does not validate metric meaning, candidate quality, queue priority, or dossier prose.
+```
+
+**Verification:**
 
 ```bash
-git add scripts/harness/render_evolution_evidence.py tests/test_evolution_evidence.py docs/evolution-evidence-contract.md
-git commit -m "feat: add local evolution evidence contract"
+grep -n "bootstrap validates only" docs/foundry-cli-contract.md docs/agent-evolution-foundry.md
 ```
+
+Expected: rule appears in docs.
 
 ---
 
-## Milestone 2: Action Queue Projection
+## Milestone 2: Manual Default-Off Foundry Dry-Run Service
 
-**Objective:** Convert evidence into Steve's preferred output: ranked action queue with ready-to-paste Hermes prompts.
+**Objective:** Add only the appliance wrapper after Foundry exposes the dry-run command.
 
 **Files:**
-- Create: `scripts/harness/render_evolution_action_queue.py`
-- Create: `tests/test_evolution_action_queue.py`
-- Update: `docs/evolution-evidence-contract.md`
+- Create: `system/nixos/hermes-evolution-foundry.nix`
+- Modify: relevant NixOS module import list
+- Create: `tests/foundry-service-contract.py` or shell equivalent
 
-### Task 2.1: Write action queue schema test
+### Task 2.1: Write the service contract test first
 
-**Objective:** Lock the bucket contract.
+**Objective:** Prove the appliance stays safe by default.
 
-Create `tests/test_evolution_action_queue.py`:
+Test expectations:
 
 ```python
-import json
-import subprocess
-import sys
-from pathlib import Path
-
-ROOT = Path(__file__).resolve().parents[1]
-EVIDENCE = ROOT / "scripts" / "harness" / "render_evolution_evidence.py"
-QUEUE = ROOT / "scripts" / "harness" / "render_evolution_action_queue.py"
+def test_foundry_service_has_no_default_timer(rendered_config):
+    assert "hermes-evolution-foundry.timer" not in rendered_config.enabled_timers
 
 
-def test_action_queue_contract(tmp_path):
-    evidence = tmp_path / "evidence.json"
-    queue = tmp_path / "queue.json"
-    subprocess.run([sys.executable, str(EVIDENCE), "--fixture", "--output", str(evidence)], check=True)
-    subprocess.run([sys.executable, str(QUEUE), "--input", str(evidence), "--output", str(queue)], check=True)
-    data = json.loads(queue.read_text())
-    assert data["schema_version"] == 1
-    assert set(data["buckets"]) == {"needsSteve", "blocked", "stale", "autonomous"}
-    assert data["buckets"]["autonomous"]
-    item = data["buckets"]["autonomous"][0]
-    assert item["prompt"].startswith("Work in")
-    assert data["external_sends"] == []
+def test_foundry_service_is_manual_oneshot(rendered_config):
+    service = rendered_config.services["hermes-evolution-foundry-dry-run"]
+    assert service.type == "oneshot"
+    assert "--no-external-writes" in service.exec_start
+    assert "--no-network" in service.exec_start
 ```
+
+If the repo test harness cannot expose rendered config this way, use the existing static Nix/shell style in this repository and assert on the module text.
 
 **Run:**
 
 ```bash
-pytest tests/test_evolution_action_queue.py -q
+pytest tests/foundry-service-contract.py -q
 ```
 
-Expected: FAIL because renderer does not exist.
+Expected: FAIL until the module exists.
 
-### Task 2.2: Implement action queue renderer
+### Task 2.2: Add the disabled/manual service wrapper
 
-**Objective:** Map candidate actions into stable buckets.
+**Objective:** Run Foundry locally without owning Foundry semantics.
 
-Create minimal renderer that:
+Implementation constraints:
 
-- reads evidence JSON
-- initializes buckets: `needsSteve`, `blocked`, `stale`, `autonomous`
-- copies candidate actions into their bucket
-- includes `external_sends: []`
-- writes sorted deterministic JSON
-- prints nothing on success
+- `Type=oneshot`
+- no timer by default
+- configurable Foundry repo/binary path
+- configurable input trace path
+- configurable report output directory
+- `DynamicUser` or dedicated least-privilege user where practical
+- output directory created by systemd/Nix activation
+- command includes fixture/dry-run safety flags
+- service fails closed on nonzero Foundry exit
 
-**Run:**
+Do not add Python scripts that render `run_report.json`, `action_queue.json`, or `promotion_dossier.md` in bootstrap.
+
+**Verification:**
 
 ```bash
-pytest tests/test_evolution_action_queue.py tests/test_evolution_evidence.py -q
+nix flake check
+pytest -q
+```
+
+Expected: existing suite passes and service contract tests pass.
+
+---
+
+## Milestone 3: Boundary Artifact Smoke Test
+
+**Objective:** Prove bootstrap can invoke Foundry and detect the expected local files without interpreting them.
+
+**Files:**
+- Create: `tests/foundry-artifact-smoke.py`
+- Modify: service docs only if needed
+
+### Task 3.1: Add a fixture-output smoke test
+
+**Objective:** Validate the wrapper/file boundary.
+
+Test behavior:
+
+1. Use a fake Foundry executable fixture that writes valid minimal files.
+2. Run the bootstrap wrapper command against a temp output directory.
+3. Assert the files exist.
+4. Parse JSON files.
+5. Assert `schema_version` exists.
+6. Assert no external-write flag is true.
+
+Do not assert queue ranking, metric correctness, candidate quality, or dossier wording.
+
+**Verification:**
+
+```bash
+pytest tests/foundry-artifact-smoke.py -q
+```
+
+Expected: PASS.
+
+---
+
+## Milestone 4: Optional Scheduled Dry-Run, Still Default-Off
+
+**Objective:** Add scheduling only after the manual wrapper and Foundry demo have value.
+
+**Files:**
+- Modify: `system/nixos/hermes-evolution-foundry.nix`
+- Modify: tests that assert default-off behavior
+
+### Task 4.1: Add opt-in timer configuration
+
+**Objective:** Allow scheduling without enabling it by default.
+
+Acceptance:
+
+- timer option defaults to disabled
+- tests prove disabled by default
+- timer command is the same dry-run/fail-closed path
+- no live sends
+- no GitHub writes
+- no production mutation
+
+**Verification:**
+
+```bash
+nix flake check
+pytest -q
 ```
 
 Expected: pass.
 
-**Commit:**
-
-```bash
-git add scripts/harness/render_evolution_action_queue.py tests/test_evolution_action_queue.py docs/evolution-evidence-contract.md
-git commit -m "feat: project evolution evidence into action queue"
-```
-
 ---
 
-## Milestone 3: Default-Off NixOS Dry-Run Service
+## Foundry-Side Work Required Before Bootstrap Milestone 2
 
-**Objective:** Package the fixture/evidence/action-queue path as a manual, disabled-by-default NixOS service.
+Create or update Foundry issues for:
 
-**Files:**
-- Modify: `system/nixos/harness.nix` or create `system/nixos/evolution-foundry.nix`
-- Modify: `system/nixos/flake.nix` if needed
-- Create: `tests/evolution-foundry-static.sh`
-- Update: `docs/agent-evolution-foundry.md`
+1. `foundry run action-routing-fixture` deterministic local command.
+2. Minimal schemas for `run_report.json`, `action_queue.json`, `promotion_dossier.md`, and `artifact_manifest.json`.
+3. Baseline-vs-candidate action-router fixture where baseline fails and candidate passes.
+4. Deterministic assertions:
+   - exactly one action item for the fixture
+   - `bucket` in `needsSteve|autonomous|blocked|stale`
+   - `owner`
+   - local `evidence_paths`
+   - `next_prompt`
+   - `expires_at`
+   - hard length budget
+   - no external writes
+5. Promotion dossier renderer in Foundry, not bootstrap.
 
-### Task 3.1: Add static test proving no timer exists by default
+## Immediate Ready-to-Paste Prompts
 
-**Objective:** Preserve delivery-safety pattern.
+### Prompt A — revise bootstrap PR #18 boundary plan
 
-Create `tests/evolution-foundry-static.sh`:
+Work in `/home/steve/hermes-bootstrap`. Revise PR #18 so hermes-bootstrap is a thin appliance wrapper for Agent Evolution Foundry. Remove bootstrap-owned evidence renderers, queue ranking, dossier rendering, event-sourced control plane, and SQLite projections from the plan. Keep only NixOS wiring, default-off/manual service wrapper, local artifact storage, retention, and schema-version boundary validation. Run docs/status checks and push the PR branch.
 
-```bash
-#!/usr/bin/env bash
-set -euo pipefail
+### Prompt B — Foundry action-router fixture
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
-cd "$ROOT"
+Work in `/home/steve/repos/steezkelly-hermes-agent-self-evolution`. Add a deterministic Foundry demo command for the repeated failure “long briefing instead of concise action queue.” It should emit `run_report.json`, `action_queue.json`, `promotion_dossier.md`, and `artifact_manifest.json` locally with no network or external writes. Baseline action-router fixture must fail at least one assertion; candidate fixture must pass. Add tests and docs.
 
-if grep -R "evolution-foundry.*timer" system/nixos; then
-  echo "Evolution Foundry timer must not exist in default config" >&2
-  exit 1
-fi
+### Prompt C — bootstrap manual service after Foundry CLI exists
 
-if ! grep -R "hermes-evolution-foundry-dry-run" system/nixos >/dev/null; then
-  echo "Expected dry-run service declaration" >&2
-  exit 1
-fi
-```
-
-**Run:**
-
-```bash
-bash tests/evolution-foundry-static.sh
-```
-
-Expected: FAIL until service declaration exists.
-
-### Task 3.2: Add manual dry-run service declaration
-
-**Objective:** Service exists, no timer, no credentials.
-
-Add service that roughly executes:
-
-```bash
-python3 /path/to/render_evolution_evidence.py --fixture --output /var/lib/hermes/reports/evolution/evidence.json
-python3 /path/to/render_evolution_action_queue.py --input /var/lib/hermes/reports/evolution/evidence.json --output /var/lib/hermes/reports/evolution/action-queue.json
-```
-
-Constraints:
-
-- `Type=oneshot`
-- no `WantedBy=timers.target`
-- no secret env files
-- creates report directory
-- fail-closed on command failure
-
-**Run:**
-
-```bash
-bash tests/evolution-foundry-static.sh
-bash tests/shell-syntax.sh
-pytest -q
-```
-
-Expected: all pass.
-
-**Commit:**
-
-```bash
-git add system/nixos tests/evolution-foundry-static.sh docs/agent-evolution-foundry.md
-git commit -m "feat: add default-off evolution foundry dry-run service"
-```
-
----
-
-## Milestone 4: Cross-Repo Foundry Adapter
-
-**Objective:** Let hermes-bootstrap call a checked-out Agent Evolution Foundry repo in fixture/dry-run mode without making the appliance own the optimizer implementation.
-
-**Files:**
-- Create: `scripts/harness/run_evolution_foundry_dry_run.py`
-- Create: `tests/test_evolution_foundry_adapter.py`
-- Update: `docs/agent-evolution-foundry.md`
-
-### Task 4.1: Define adapter test with missing repo behavior
-
-**Objective:** Missing Foundry repo should fail clearly, not silently.
-
-Test behavior:
-
-```bash
-python3 scripts/harness/run_evolution_foundry_dry_run.py --foundry-repo /missing --output /tmp/report.json
-```
-
-Expected:
-
-- nonzero exit
-- stderr contains `Foundry repo not found`
-- no output file
-
-### Task 4.2: Define adapter fixture behavior
-
-**Objective:** If Foundry repo path exists, fixture mode produces local report without network.
-
-Contract:
-
-```json
-{
-  "schema_version": 1,
-  "mode": "fixture",
-  "foundry_repo": "/path",
-  "commands_run": [],
-  "external_sends": [],
-  "github_writes": [],
-  "promotion_allowed": false
-}
-```
-
-**Verification:**
-
-```bash
-pytest tests/test_evolution_foundry_adapter.py -q
-```
-
-**Commit:**
-
-```bash
-git add scripts/harness/run_evolution_foundry_dry_run.py tests/test_evolution_foundry_adapter.py docs/agent-evolution-foundry.md
-git commit -m "feat: add Agent Evolution Foundry dry-run adapter"
-```
-
----
-
-## Milestone 5: Promotion Dossier, Not Auto-Promotion
-
-**Objective:** Generate a review dossier that a human/agent can use to create PRs, but do not create PRs from the appliance service.
-
-**Files:**
-- Create: `scripts/harness/render_evolution_promotion_dossier.py`
-- Create: `tests/test_evolution_promotion_dossier.py`
-- Update: `docs/evolution-evidence-contract.md`
-
-### Task 5.1: Write dossier test
-
-**Objective:** Dossier includes evidence paths and explicit manual prompt.
-
-Expected fields:
-
-```json
-{
-  "schema_version": 1,
-  "promotion_allowed": false,
-  "manual_only": true,
-  "evidence_paths": ["..."],
-  "recommended_prompt": "Work in ...",
-  "github_writes": []
-}
-```
-
-### Task 5.2: Implement dossier renderer
-
-**Objective:** Convert action queue + evidence into a manual promotion package.
-
-The dossier is allowed to say:
-
-- what changed
-- what tests passed
-- what prompt to paste into Hermes
-- what files contain evidence
-
-The dossier is not allowed to:
-
-- run `gh pr create`
-- send messages
-- mutate production skills
-
-**Verification:**
-
-```bash
-pytest tests/test_evolution_promotion_dossier.py tests/test_evolution_action_queue.py tests/test_evolution_evidence.py -q
-```
-
-**Commit:**
-
-```bash
-git add scripts/harness/render_evolution_promotion_dossier.py tests/test_evolution_promotion_dossier.py docs/evolution-evidence-contract.md
-git commit -m "feat: render manual evolution promotion dossiers"
-```
-
----
-
-## Milestone 6: First Useful End-to-End Drill
-
-**Objective:** Prove the appliance can generate a local action queue and promotion dossier from fixtures in one command.
-
-**Files:**
-- Create: `scripts/harness/evolution_foundry_drill.py`
-- Create: `tests/test_evolution_foundry_drill.py`
-- Update: `docs/agent-evolution-foundry.md`
-
-### Task 6.1: Build one-command local drill
-
-Command:
-
-```bash
-python3 scripts/harness/evolution_foundry_drill.py --output-dir /tmp/hermes-evolution-drill --fixture
-```
-
-Expected artifacts:
-
-```text
-/tmp/hermes-evolution-drill/evidence.json
-/tmp/hermes-evolution-drill/action-queue.json
-/tmp/hermes-evolution-drill/promotion-dossier.json
-```
-
-Expected behavior:
-
-- quiet on success unless `--verbose`
-- deterministic fixture output
-- no external sends
-- no GitHub writes
-- nonzero if any artifact fails validation
-
-### Task 6.2: Add final verification target
-
-Run:
-
-```bash
-bash tests/shell-syntax.sh
-bash tests/evolution-foundry-static.sh
-pytest -q
-python3 scripts/harness/evolution_foundry_drill.py --fixture --output-dir /tmp/hermes-evolution-drill
-python3 -m json.tool /tmp/hermes-evolution-drill/action-queue.json >/dev/null
-```
-
-Expected: all pass.
-
-**Commit:**
-
-```bash
-git add scripts/harness/evolution_foundry_drill.py tests/test_evolution_foundry_drill.py docs/agent-evolution-foundry.md
-git commit -m "feat: add local Agent Evolution Foundry appliance drill"
-```
-
----
-
-## Parallel Track in Agent Evolution Foundry Repo
-
-This hermes-bootstrap plan depends on a paired Foundry-side plan in `/home/steve/repos/steezkelly-hermes-agent-self-evolution`.
-
-Recommended next Foundry PRs:
-
-1. Rename public identity from Agent Evolution Lab to Agent Evolution Foundry.
-   - `README.md`
-   - `pyproject.toml` description if appropriate
-   - `docs/philosophy.md`
-   - issue #9 title/body
-
-2. Add deterministic demo mode.
-   - command emits run report with no live LLM calls
-   - checks report schema
-   - no GitHub writes
-
-3. Split PR #1.
-   - observatory core
-   - content evolution mode
-   - fitness hooks
-
-4. Add appliance adapter output contract.
-   - Foundry produces `evidence.json`, `run-report.json`, and `promotion-dossier.json` compatible with hermes-bootstrap.
-
----
-
-## Ready-To-Paste Execution Prompts
-
-### Prompt 1: docs-only contract PR
-
-Work in `/home/steve/hermes-bootstrap`. Implement Milestone 0 from `docs/agent-evolution-foundry-implementation-plan.md`. Keep it docs-only. Define Hermes Agent as runtime/organism, Agent Evolution Foundry as crucible/evidence loop, and hermes-bootstrap as appliance habitat. Include out-of-scope claims and safety boundaries. Run available docs/static checks. Open a PR with local evidence.
-
-### Prompt 2: local evidence spine PR
-
-Work in `/home/steve/hermes-bootstrap`. Implement Milestone 1 from `docs/agent-evolution-foundry-implementation-plan.md`. Use TDD. Add deterministic fixture evidence renderer, tests, and evidence contract docs. It must be quiet on success, deterministic, and prove no external sends/GitHub writes. Run `pytest tests/test_evolution_evidence.py -q` and full `pytest -q`.
-
-### Prompt 3: action queue PR
-
-Work in `/home/steve/hermes-bootstrap`. Implement Milestone 2 from `docs/agent-evolution-foundry-implementation-plan.md`. Convert local evolution evidence into an action queue with buckets `needsSteve`, `blocked`, `stale`, `autonomous` and ready-to-paste Hermes prompts. Run focused tests and full pytest.
-
-### Prompt 4: default-off NixOS service PR
-
-Work in `/home/steve/hermes-bootstrap`. Implement Milestone 3 from `docs/agent-evolution-foundry-implementation-plan.md`. Add a manual/default-off NixOS dry-run service for Agent Evolution Foundry fixture reports. Add static tests proving no timer exists by default and no credentials/live sends are required. Run shell syntax tests and pytest.
-
-### Prompt 5: Foundry-side identity/deterministic demo
-
-Work in `/home/steve/repos/steezkelly-hermes-agent-self-evolution`. Rename public positioning from Agent Evolution Lab to Agent Evolution Foundry and add a deterministic demo/report mode that hermes-bootstrap can call without live LLMs. Keep claims falsifiable: artifact evolution, evidence, gates, reports. Run full pytest and update issue #9.
-
----
-
-## Definition of Done for the First Valuable Slice
-
-The first valuable slice is complete when all of this is true:
-
-1. `hermes-bootstrap` has docs explaining the three-part architecture.
-2. A fixture command creates local evolution evidence JSON.
-3. A second command converts it into an action queue with ready-to-paste prompts.
-4. A manual/default-off NixOS dry-run service can run the fixture path.
-5. Tests prove no timers, sends, GitHub writes, or credentials are involved.
-6. `Agent Evolution Foundry` has a deterministic demo/report mode compatible with the bootstrap artifact contract.
-
-This is the minimum useful bridge from vision to appliance.
+Work in `/home/steve/hermes-bootstrap`. After Foundry exposes the deterministic CLI, add a default-off/manual NixOS oneshot service that invokes it with fixture/dry-run safety flags and stores outputs under a configured local report directory. Add tests proving no timer is enabled by default and no service performs live sends, GitHub writes, or production mutation.
