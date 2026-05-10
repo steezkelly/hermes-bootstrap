@@ -7,33 +7,47 @@ Coverage:
 """
 
 import json
+import os
 import subprocess
-import tempfile
 import pytest
 from pathlib import Path
-from unittest import mock
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Paths
 # ─────────────────────────────────────────────────────────────────────────────
 
-BOOTSTRAP_ROOT = Path("/home/steve/hermes-bootstrap")
+BOOTSTRAP_ROOT = Path(__file__).resolve().parents[1]
 WRAPPER_SCRIPT = BOOTSTRAP_ROOT / "scripts/harness/run_foundry_observatory_health.py"
 VALIDATOR_SCRIPT = BOOTSTRAP_ROOT / "scripts/harness/validate_foundry_observatory_health.py"
-FOUNDRY_REPO = "/home/steve/repos/steezkelly-hermes-agent-self-evolution"
-PYTHON_BIN = "/home/steve/repos/steezkelly-hermes-agent-self-evolution/.venv-review/bin/python"
+FOUNDRY_REPO = Path(os.environ.get(
+    "FOUNDRY_REPO",
+    "/home/steve/repos/steezkelly-hermes-agent-self-evolution",
+))
+PYTHON_BIN = Path(os.environ.get(
+    "FOUNDRY_PYTHON_BIN",
+    str(FOUNDRY_REPO / ".venv-review/bin/python"),
+))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _require_foundry_smoke_env() -> None:
+    """Skip integration smoke tests when Foundry checkout is not present."""
+    if not FOUNDRY_REPO.is_dir():
+        pytest.skip(f"Foundry checkout not available: {FOUNDRY_REPO}")
+    if not PYTHON_BIN.is_file():
+        pytest.skip(f"Foundry Python not available: {PYTHON_BIN}")
+
+
 def _create_smoke_db(tmp_path: Path) -> str:
     """Run observatory smoke test to generate a judge_audit_log.db."""
+    _require_foundry_smoke_env()
     result = subprocess.run(
-        [PYTHON_BIN, "scripts/observatory_smoke_test.py"],
-        cwd=FOUNDRY_REPO,
+        [str(PYTHON_BIN), "scripts/observatory_smoke_test.py"],
+        cwd=str(FOUNDRY_REPO),
         capture_output=True,
         text=True,
         timeout=30,
@@ -54,8 +68,8 @@ def _run_wrapper(db_path: str, output_path: Path, **kwargs) -> subprocess.Comple
     """Run the observatory wrapper script."""
     cmd = [
         "/usr/bin/python3", str(WRAPPER_SCRIPT),
-        "--foundry-repo", FOUNDRY_REPO,
-        "--python-bin", PYTHON_BIN,
+        "--foundry-repo", str(FOUNDRY_REPO),
+        "--python-bin", str(PYTHON_BIN),
         "--db-path", db_path,
         "--output", str(output_path),
     ]
@@ -108,6 +122,7 @@ class TestObservatoryWrapper:
 
     def test_empty_db_produces_empty_report(self, tmp_path):
         """Wrapper produces a valid (but empty) report for an empty DB."""
+        _require_foundry_smoke_env()
         # Create an empty DB via Foundry's Python
         script = f"""
 import json, sys
@@ -121,7 +136,7 @@ report = monitor.health_report()
 print(json.dumps(report.as_dict(), indent=2))
 """
         result = subprocess.run(
-            [PYTHON_BIN, "-c", script],
+            [str(PYTHON_BIN), "-c", script],
             capture_output=True, text=True, timeout=10,
         )
         assert result.returncode == 0

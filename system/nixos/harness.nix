@@ -351,6 +351,72 @@ let
         --report /var/lib/hermes/reports/evolution/observatory/health.json
     '';
   };
+  foundryContentEvolution = pkgs.writeShellApplication {
+    name = "hermes-evolution-foundry-content-evolution";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
+      if [ ! -f "$foundry_repo/evolution/skills/evolve_content.py" ]; then
+        echo "Foundry content evolution CLI missing: $foundry_repo/evolution/skills/evolve_content.py" >&2
+        exit 1
+      fi
+
+      skill="''${FOUNDRY_CONTENT_SKILL:-}"
+      if [ -z "$skill" ]; then
+        echo "FOUNDRY_CONTENT_SKILL is required (example: github-code-review)" >&2
+        exit 1
+      fi
+
+      eval_source="''${FOUNDRY_CONTENT_EVAL_SOURCE:-synthetic}"
+      case "$eval_source" in
+        synthetic|golden|sessiondb) ;;
+        *)
+          echo "Unsupported FOUNDRY_CONTENT_EVAL_SOURCE: $eval_source (expected synthetic|golden|sessiondb)" >&2
+          exit 1
+          ;;
+      esac
+
+      dataset_path="''${FOUNDRY_CONTENT_DATASET_PATH:-}"
+      evaluator_model="''${FOUNDRY_CONTENT_EVALUATOR_MODEL:-minimax/minimax-m2.7}"
+      rewrite_model="''${FOUNDRY_CONTENT_REWRITE_MODEL:-minimax/minimax-m2.7}"
+      rewrite_budget="''${FOUNDRY_CONTENT_REWRITE_BUDGET:-3}"
+      weak_fraction="''${FOUNDRY_CONTENT_WEAK_FRACTION:-0.3333333333333333}"
+      hermes_repo="''${FOUNDRY_CONTENT_HERMES_REPO:-/var/lib/hermes/.hermes}"
+
+      export HOME=/var/lib/hermes
+      export HERMES_HOME=/var/lib/hermes/.hermes
+      export HERMES_AGENT_REPO="$hermes_repo"
+
+      args=(
+        --foundry-repo /var/lib/hermes/foundry/hermes-agent-self-evolution
+        --python-bin ${python}/bin/python3
+        --skill "$skill"
+        --output-dir /var/lib/hermes/reports/evolution/content-evolution
+        --eval-source "$eval_source"
+        --evaluator-model "$evaluator_model"
+        --rewrite-model "$rewrite_model"
+        --rewrite-budget "$rewrite_budget"
+        --weak-fraction "$weak_fraction"
+        --hermes-repo "$hermes_repo"
+      )
+      if [ -n "$dataset_path" ]; then
+        args+=(--dataset-path "$dataset_path")
+      fi
+      if [ "''${FOUNDRY_CONTENT_DRY_RUN:-}" = "1" ]; then
+        args+=(--dry-run)
+      fi
+
+      exec ${python}/bin/python3 ${harnessDir}/run_foundry_content_evolution.py "''${args[@]}"
+    '';
+  };
+  validateFoundryContentEvolution = pkgs.writeShellApplication {
+    name = "hermes-validate-foundry-content-evolution";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_content_evolution.py \
+        /var/lib/hermes/reports/evolution/content-evolution
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -396,6 +462,7 @@ in
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/evolution
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/evolution/attention-router-bridge
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/evolution/pipeline-runner
+      ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/evolution/content-evolution
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2750 /var/lib/hermes/foundry
       ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2750 /var/lib/hermes/delivery
       ${pkgs.coreutils}/bin/install -d -o hermes-delivery -g hermes -m 2770 /var/lib/hermes/delivery/state
@@ -774,6 +841,39 @@ in
       ReadWritePaths = lib.mkForce [ ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/reports/evolution/observatory"
+      ];
+    };
+  };
+
+  systemd.services.hermes-evolution-foundry-content-evolution = {
+    description = "Run Foundry skill content evolution manually";
+    after = [ "hermes-evolution-foundry-observatory-health.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${foundryContentEvolution}/bin/hermes-evolution-foundry-content-evolution";
+      Environment = [
+        "HOME=/var/lib/hermes"
+        "HERMES_HOME=/var/lib/hermes/.hermes"
+      ];
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution/content-evolution" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+        "/var/lib/hermes/.hermes"
+      ];
+      InaccessiblePaths = lib.mkForce [
+        "-/var/lib/hermes/secrets"
+        "-/var/lib/hermes/.hermes/.env"
+      ];
+    };
+  };
+
+  systemd.services.hermes-validate-foundry-content-evolution = {
+    description = "Validate Foundry content evolution output boundaries";
+    after = [ "hermes-evolution-foundry-content-evolution.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${validateFoundryContentEvolution}/bin/hermes-validate-foundry-content-evolution";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution/content-evolution"
       ];
     };
   };
