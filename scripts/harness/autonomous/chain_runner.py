@@ -116,6 +116,8 @@ def _self_test_bucket(line: str) -> str:
         "importerror",
         "no module named",
         "permissionerror",
+        "filenotfounderror",
+        "filenotfou",
         "pytestcachewarning",
         "read-only file system",
     )):
@@ -125,6 +127,15 @@ def _self_test_bucket(line: str) -> str:
     if "tests/core/test_v2_pipeline_integration.py" in lower:
         return "real_regression"
     if any(marker in lower for marker in (
+        "safety flag",
+        "safety disabled",
+        "tests/core/test_trace_optimizer.py",
+        "tests/core/test_gepa_trace_bridge.py",
+        "tests/core/test_observatory_logger.py",
+    )):
+        return "real_regression"
+    if any(marker in lower for marker in (
+        "tests/core/test_capture_plugin.py",
         "tests/tools/test_tool_description_evolution.py",
         "tests/skills/test_content_evolver.py",
         "tests/skills/test_evolve_skill_gates.py",
@@ -355,12 +366,11 @@ def _relay_outbox(config: Config, logger: JsonlLogger) -> int:
     for msg_file in sorted(outbox.glob("*.json")):
         try:
             subprocess.run(
-                ["scp",
+                ["sudo", "-u", "hermes", "scp",
                  "-o", "BatchMode=yes",
                  "-o", "ConnectTimeout=5",
                  "-o", "StrictHostKeyChecking=accept-new",
                  "-o", "UserKnownHostsFile=/dev/null",
-                 "-i", str(config.base / ".ssh" / "id_ed25519"),
                  str(msg_file), RELAY_TARGET],
                 check=True, capture_output=True, text=True, timeout=15,
             )

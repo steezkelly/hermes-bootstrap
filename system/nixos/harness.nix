@@ -917,8 +917,6 @@ in
     description = "Run autonomous evolution chain on detected sessions";
     after = [ "hermes-agent.service" ];
     serviceConfig = commonServiceConfig // {
-      User = "hermes";
-      Group = "hermes";
       ExecStart = "${autonomousEvolutionChain}/bin/hermes-autonomous-evolution-chain";
       Environment = [ "NIX_LD_LIBRARY_PATH=/run/current-system/sw/share/nix-ld/lib" ];
       ReadWritePaths = lib.mkForce [
