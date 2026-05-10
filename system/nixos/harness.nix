@@ -2,7 +2,7 @@
 
 let
   python = pkgs.python3;
-  pythonFoundry = pkgs.python3.withPackages (ps: [ ps.numpy ps.click ]);
+  pythonFoundry = pkgs.python3.withPackages (ps: [ ps.numpy ps.click ps.scikitlearn ]);
   deployment = import ./deployment-options.nix;
   harnessDir = ../../scripts/harness;
   harnessBase = "/var/lib/hermes";
