@@ -1,0 +1,577 @@
+#!/usr/bin/env python3
+"""Configurable autonomous Foundry chain runner.
+
+This runner is executed by the always-on Bootstrap service
+`hermes-autonomous-evolution-chain`. Bootstrap owns only orchestration,
+configuration, state, and logging. Foundry modules own the semantics of each
+stage.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+import time
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+DEFAULT_BASE = Path("/var/lib/hermes")
+DEFAULT_FOUNDRY_REPO = DEFAULT_BASE / "foundry" / "hermes-agent-self-evolution"
+DEFAULT_SESSIONS_DIR = DEFAULT_BASE / ".hermes" / "sessions"
+DEFAULT_REPORTS_DIR = DEFAULT_BASE / "reports" / "evolution"
+DEFAULT_DSPY_PYTHON = Path("/var/lib/hermes/foundry-venv/bin/python")
+DEFAULT_STEPS = [
+    "real_trace_ingestion",
+    "attention_router_bridge",
+    "trace_optimizer",
+    "gepa_bridge",
+    "observatory_health",
+]
+DEFAULT_REQUIRED_STEPS = [
+    "real_trace_ingestion",
+    "attention_router_bridge",
+    "trace_optimizer",
+]
+VALID_STEPS = set(DEFAULT_STEPS)
+ENV_PREFIX = "HERMES_AUTONOMOUS_"
+
+
+@dataclass(frozen=True)
+class StepResult:
+    step: str
+    status: str
+    required: bool
+    returncode: int | None = None
+    argv: list[str] | None = None
+    stdout_tail: str = ""
+    stderr_tail: str = ""
+    duration_ms: int = 0
+    reason: str = ""
+
+
+class JsonlLogger:
+    def __init__(self, log_file: Path, run_id: str) -> None:
+        self.log_file = log_file
+        self.run_id = run_id
+        self.log_file.parent.mkdir(parents=True, exist_ok=True)
+
+    def emit(self, event: str, level: str = "info", **fields: Any) -> None:
+        record = {
+            "ts": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "level": level,
+            "event": event,
+            "run_id": self.run_id,
+            **fields,
+        }
+        line = json.dumps(record, sort_keys=True)
+        print(line, flush=True)
+        with self.log_file.open("a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+
+
+def _tail(text: str, limit: int = 2000) -> str:
+    if len(text) <= limit:
+        return text
+    return text[-limit:]
+
+
+def _parse_steps(value: Any) -> list[str]:
+    if value is None or value == "":
+        return []
+    if isinstance(value, list):
+        steps = [str(item).strip() for item in value if str(item).strip()]
+    else:
+        steps = [part.strip() for part in str(value).split(",") if part.strip()]
+    invalid = [step for step in steps if step not in VALID_STEPS]
+    if invalid:
+        raise ValueError(f"unknown autonomous chain step(s): {', '.join(invalid)}")
+    return steps
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise ValueError(f"config file not found: {path}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid JSON config {path}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"config file must contain a JSON object: {path}")
+    return data
+
+
+def _env(name: str) -> str | None:
+    return os.environ.get(ENV_PREFIX + name)
+
+
+def _value(config: dict[str, Any], key: str, env_name: str, default: Any) -> Any:
+    env_value = _env(env_name)
+    if env_value is not None and env_value != "":
+        return env_value
+    return config.get(key, default)
+
+
+def _path_value(config: dict[str, Any], key: str, env_name: str, default: Path) -> Path:
+    return Path(str(_value(config, key, env_name, default)))
+
+
+def _positive_int(value: Any, *, name: str) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if parsed <= 0:
+        raise ValueError(f"{name} must be positive")
+    return parsed
+
+
+def _parse_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+@dataclass
+class Config:
+    base: Path
+    foundry_repo: Path
+    sessions_dir: Path
+    reports_dir: Path
+    state_file: Path
+    log_file: Path
+    trace_file: Path
+    python_bin: str
+    dspy_python: str
+    observatory_db: Path
+    steps: list[str]
+    required_steps: set[str]
+    force: bool
+    timeout_seconds: int
+
+
+def _optional_path(config: dict[str, Any], key: str, env_name: str) -> Path | None:
+    env_value = _env(env_name)
+    if env_value is not None and env_value != "":
+        return Path(env_value)
+    if key in config and config[key] not in (None, ""):
+        return Path(str(config[key]))
+    return None
+
+
+def parse_args(argv: list[str]) -> Config:
+    pre = argparse.ArgumentParser(add_help=False)
+    pre.add_argument("--config", type=Path)
+    known, remaining = pre.parse_known_args(argv)
+    json_config = _read_json(known.config) if known.config else {}
+
+    default_base = _path_value(json_config, "base", "BASE", DEFAULT_BASE)
+    default_reports = _path_value(json_config, "reports_dir", "REPORTS_DIR", default_base / "reports" / "evolution")
+    default_steps = _parse_steps(_value(json_config, "steps", "STEPS", DEFAULT_STEPS)) or DEFAULT_STEPS
+    required_source_set = (
+        "required_steps" in json_config
+        or _env("REQUIRED_STEPS") not in (None, "")
+        or "--required-steps" in remaining
+    )
+    if required_source_set:
+        default_required = _parse_steps(_value(json_config, "required_steps", "REQUIRED_STEPS", DEFAULT_REQUIRED_STEPS)) or []
+    else:
+        default_required = [step for step in DEFAULT_REQUIRED_STEPS if step in default_steps]
+
+    parser = argparse.ArgumentParser(description="Run the local-only autonomous Foundry evolution chain.")
+    parser.add_argument("--config", type=Path, default=known.config, help="Optional JSON config file. CLI flags override JSON/env/defaults.")
+    parser.add_argument("--base", type=Path, default=default_base, help="Hermes appliance base directory.")
+    parser.add_argument("--foundry-repo", type=Path, default=_path_value(json_config, "foundry_repo", "FOUNDRY_REPO", DEFAULT_FOUNDRY_REPO))
+    parser.add_argument("--sessions-dir", type=Path, default=_path_value(json_config, "sessions_dir", "SESSIONS_DIR", DEFAULT_SESSIONS_DIR))
+    parser.add_argument("--reports-dir", type=Path, default=default_reports)
+    parser.add_argument("--state-file", type=Path, default=_optional_path(json_config, "state_file", "STATE_FILE"))
+    parser.add_argument("--log-file", type=Path, default=_optional_path(json_config, "log_file", "LOG_FILE"))
+    parser.add_argument("--trace-file", type=Path, default=_optional_path(json_config, "trace_file", "TRACE_FILE"))
+    parser.add_argument("--python-bin", default=str(_value(json_config, "python_bin", "PYTHON_BIN", sys.executable)))
+    parser.add_argument("--dspy-python", default=str(_value(json_config, "dspy_python", "DSPY_PYTHON", DEFAULT_DSPY_PYTHON)))
+    parser.add_argument("--observatory-db", type=Path, default=_optional_path(json_config, "observatory_db", "OBSERVATORY_DB"))
+    parser.add_argument("--steps", default=",".join(default_steps), help="Comma-separated step list.")
+    parser.add_argument("--required-steps", default=",".join(default_required), help="Comma-separated steps whose failure fails the service.")
+    parser.add_argument("--force", action="store_true", default=_parse_bool(_value(json_config, "force", "FORCE", False)), help="Run even when the session count did not increase.")
+    parser.add_argument("--timeout-seconds", default=_positive_int(_value(json_config, "timeout_seconds", "TIMEOUT_SECONDS", 600), name="timeout_seconds"))
+
+    args = parser.parse_args(remaining)
+    steps = _parse_steps(args.steps)
+    required_steps = set(_parse_steps(args.required_steps))
+    if not required_source_set and "--steps" in remaining:
+        required_steps = {step for step in DEFAULT_REQUIRED_STEPS if step in steps}
+    missing_required = required_steps - set(steps)
+    if missing_required:
+        raise ValueError(f"required step(s) absent from configured steps: {', '.join(sorted(missing_required))}")
+
+    reports_dir = args.reports_dir
+    state_file = args.state_file or (reports_dir / "autonomous-state.json")
+    log_file = args.log_file or (reports_dir / "autonomous-chain.jsonl")
+    trace_file = args.trace_file or (reports_dir / "autonomous-trace.jsonl")
+    observatory_db = args.observatory_db or (reports_dir / "observatory" / "judge_audit_log.db")
+
+    return Config(
+        base=args.base,
+        foundry_repo=args.foundry_repo,
+        sessions_dir=args.sessions_dir,
+        reports_dir=reports_dir,
+        state_file=state_file,
+        log_file=log_file,
+        trace_file=trace_file,
+        python_bin=args.python_bin,
+        dspy_python=args.dspy_python,
+        observatory_db=observatory_db,
+        steps=steps,
+        required_steps=required_steps,
+        force=args.force,
+        timeout_seconds=_positive_int(args.timeout_seconds, name="timeout_seconds"),
+    )
+
+
+def _load_state(path: Path, logger: JsonlLogger) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        logger.emit("state_parse_failed", level="warning", path=str(path), error=str(exc))
+        return {}
+    if not isinstance(data, dict):
+        logger.emit("state_parse_failed", level="warning", path=str(path), error="state is not a JSON object")
+        return {}
+    return data
+
+
+def _write_state(path: Path, *, session_count: int, run_id: str, status: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": 1,
+        "session_count": session_count,
+        "last_run": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "last_run_id": run_id,
+        "last_status": status,
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _session_files(sessions_dir: Path) -> list[Path]:
+    return sorted(sessions_dir.glob("session_*.json"))
+
+
+def _messages_from_session(path: Path) -> list[Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        messages = data.get("messages")
+        if isinstance(messages, list):
+            return messages
+        return [data]
+    return [{"value": data}]
+
+
+def export_sessions_jsonl(session_files: list[Path], trace_file: Path, logger: JsonlLogger) -> int:
+    trace_file.parent.mkdir(parents=True, exist_ok=True)
+    written = 0
+    with trace_file.open("w", encoding="utf-8") as handle:
+        for session_path in session_files:
+            try:
+                messages = _messages_from_session(session_path)
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.emit("session_parse_failed", level="warning", path=str(session_path), error=str(exc))
+                continue
+            for message in messages:
+                handle.write(json.dumps(message, default=str, sort_keys=True) + "\n")
+                written += 1
+    try:
+        trace_file.chmod(0o640)
+    except OSError as exc:
+        logger.emit("trace_chmod_failed", level="warning", path=str(trace_file), error=str(exc))
+    logger.emit("trace_exported", path=str(trace_file), session_files=len(session_files), messages=written)
+    return written
+
+
+def _run_subprocess(step: str, argv: list[str], *, cwd: Path, timeout_seconds: int, logger: JsonlLogger, required: bool) -> StepResult:
+    logger.emit("step_started", step=step, required=required, cwd=str(cwd), argv=argv)
+    started = time.monotonic()
+    try:
+        completed = subprocess.run(
+            argv,
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            env={**os.environ, "PYTHONPATH": f"{cwd}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"},
+        )
+        duration_ms = int((time.monotonic() - started) * 1000)
+        status = "success" if completed.returncode == 0 else "failed"
+        result = StepResult(
+            step=step,
+            status=status,
+            required=required,
+            returncode=completed.returncode,
+            argv=argv,
+            stdout_tail=_tail(completed.stdout),
+            stderr_tail=_tail(completed.stderr),
+            duration_ms=duration_ms,
+        )
+    except FileNotFoundError as exc:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        result = StepResult(step=step, status="failed", required=required, returncode=127, argv=argv, stderr_tail=str(exc), duration_ms=duration_ms)
+    except subprocess.TimeoutExpired as exc:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        result = StepResult(
+            step=step,
+            status="failed",
+            required=required,
+            returncode=124,
+            argv=argv,
+            stdout_tail=_tail(exc.stdout if isinstance(exc.stdout, str) else ""),
+            stderr_tail=_tail(exc.stderr if isinstance(exc.stderr, str) else f"timeout after {timeout_seconds}s"),
+            duration_ms=duration_ms,
+        )
+
+    logger.emit(
+        "step_finished",
+        level="info" if result.status == "success" else "error",
+        step=result.step,
+        status=result.status,
+        required=result.required,
+        returncode=result.returncode,
+        argv=result.argv,
+        stdout_tail=result.stdout_tail,
+        stderr_tail=result.stderr_tail,
+        duration_ms=result.duration_ms,
+    )
+    return result
+
+
+def _skip(step: str, reason: str, *, logger: JsonlLogger, required: bool) -> StepResult:
+    logger.emit("step_skipped", level="warning" if required else "info", step=step, required=required, reason=reason)
+    return StepResult(step=step, status="skipped", required=required, reason=reason)
+
+
+def _python_import_probe(python_bin: str, modules: list[str], *, cwd: Path, timeout_seconds: int) -> tuple[bool, str]:
+    code = "; ".join(f"import {module}" for module in modules)
+    try:
+        completed = subprocess.run(
+            [python_bin, "-c", code],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=min(timeout_seconds, 30),
+            env={**os.environ, "PYTHONPATH": f"{cwd}{os.pathsep}{os.environ.get('PYTHONPATH', '')}"},
+        )
+    except FileNotFoundError as exc:
+        return False, str(exc)
+    except subprocess.TimeoutExpired:
+        return False, "import probe timed out"
+    if completed.returncode == 0:
+        return True, ""
+    detail = (completed.stderr or completed.stdout or f"exit {completed.returncode}").strip()
+    return False, _tail(detail, limit=500)
+
+
+def _command_for_step(step: str, config: Config) -> tuple[list[str] | None, Path, str | None]:
+    reports = config.reports_dir
+    if step == "real_trace_ingestion":
+        return (
+            [
+                config.python_bin,
+                "-m",
+                "evolution.core.real_trace_ingestion",
+                "--trace",
+                str(config.trace_file),
+                "--out",
+                str(reports / "real-trace-ingestion"),
+                "--mode",
+                "real_trace",
+                "--no-network",
+                "--no-external-writes",
+            ],
+            config.foundry_repo,
+            None,
+        )
+    if step == "attention_router_bridge":
+        return (
+            [
+                config.python_bin,
+                "-m",
+                "evolution.core.attention_router_bridge",
+                "--input",
+                str(reports / "real-trace-ingestion"),
+                "--out",
+                str(reports / "attention-router-bridge"),
+                "--mode",
+                "attention_router_bridge",
+                "--no-network",
+                "--no-external-writes",
+            ],
+            config.foundry_repo,
+            None,
+        )
+    if step == "trace_optimizer":
+        eval_examples = reports / "real-trace-ingestion" / "eval_examples.json"
+        if not eval_examples.is_file():
+            return None, config.foundry_repo, f"missing eval examples: {eval_examples}"
+        return (
+            [
+                config.python_bin,
+                "-m",
+                "evolution.core.trace_optimizer",
+                "--eval-examples",
+                str(eval_examples),
+                "--out",
+                str(reports / "trace-optimizer"),
+                "--mode",
+                "optimizer",
+                "--no-network",
+                "--no-external-writes",
+            ],
+            config.foundry_repo,
+            None,
+        )
+    if step == "gepa_bridge":
+        candidate_artifacts = reports / "trace-optimizer" / "candidate_artifacts.json"
+        if not candidate_artifacts.is_file():
+            return None, config.foundry_repo, f"missing candidate artifacts: {candidate_artifacts}"
+        if not Path(config.dspy_python).is_file():
+            return None, config.foundry_repo, f"dspy python not found: {config.dspy_python}"
+        imports_ok, import_error = _python_import_probe(
+            config.dspy_python,
+            ["sklearn", "dspy"],
+            cwd=config.foundry_repo,
+            timeout_seconds=config.timeout_seconds,
+        )
+        if not imports_ok:
+            return None, config.foundry_repo, f"dspy python missing required imports: {import_error}"
+        return (
+            [
+                config.dspy_python,
+                "-m",
+                "evolution.core.gepa_trace_bridge",
+                "--candidate-artifacts",
+                str(candidate_artifacts),
+                "--out",
+                str(reports / "gepa-bridge"),
+                "--no-network",
+                "--no-external-writes",
+            ],
+            config.foundry_repo,
+            None,
+        )
+    if step == "observatory_health":
+        if not config.observatory_db.is_file():
+            return None, config.foundry_repo, f"observatory DB not found: {config.observatory_db}"
+        return (
+            [
+                config.python_bin,
+                "-m",
+                "evolution.core.observatory.cli",
+                "--db-path",
+                str(config.observatory_db),
+                "health",
+                "--json",
+            ],
+            config.foundry_repo,
+            None,
+        )
+    raise ValueError(f"unknown step: {step}")
+
+
+def validate_config(config: Config) -> None:
+    if not (config.foundry_repo / "evolution").is_dir():
+        raise RuntimeError(f"Foundry repo missing evolution package: {config.foundry_repo}")
+    if not config.sessions_dir.is_dir():
+        raise RuntimeError(f"Hermes sessions directory missing: {config.sessions_dir}")
+    config.reports_dir.mkdir(parents=True, exist_ok=True)
+
+
+def run(config: Config, logger: JsonlLogger) -> int:
+    validate_config(config)
+    session_files = _session_files(config.sessions_dir)
+    session_count = len(session_files)
+    state = _load_state(config.state_file, logger)
+    last_count = int(state.get("session_count", 0) or 0)
+
+    logger.emit(
+        "run_started",
+        base=str(config.base),
+        foundry_repo=str(config.foundry_repo),
+        sessions_dir=str(config.sessions_dir),
+        reports_dir=str(config.reports_dir),
+        state_file=str(config.state_file),
+        log_file=str(config.log_file),
+        session_count=session_count,
+        previous_session_count=last_count,
+        force=config.force,
+        steps=config.steps,
+        required_steps=sorted(config.required_steps),
+        python_bin=config.python_bin,
+        dspy_python=config.dspy_python,
+    )
+
+    if session_count == 0:
+        logger.emit("idle", reason="no session_*.json files found", session_count=session_count, previous_session_count=last_count)
+        return 0
+    if not config.force and session_count <= last_count:
+        logger.emit("idle", reason="session count has not increased", session_count=session_count, previous_session_count=last_count)
+        return 0
+
+    message_count = export_sessions_jsonl(session_files, config.trace_file, logger)
+    if message_count == 0:
+        logger.emit("run_finished", level="error", status="failed", reason="no valid session messages exported")
+        return 1
+
+    failures: list[StepResult] = []
+    for step in config.steps:
+        required = step in config.required_steps
+        argv, cwd, skip_reason = _command_for_step(step, config)
+        if skip_reason:
+            result = _skip(step, skip_reason, logger=logger, required=required)
+        else:
+            assert argv is not None
+            result = _run_subprocess(step, argv, cwd=cwd, timeout_seconds=config.timeout_seconds, logger=logger, required=required)
+            if step == "observatory_health" and result.status == "success" and result.stdout_tail.strip():
+                out_dir = config.reports_dir / "observatory-health"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                (out_dir / "health_report.json").write_text(result.stdout_tail.strip() + "\n", encoding="utf-8")
+                logger.emit("artifact_written", step=step, path=str(out_dir / "health_report.json"))
+
+        if required and result.status != "success":
+            failures.append(result)
+            break
+        if not required and result.status == "failed":
+            logger.emit("optional_step_failed", level="warning", step=step, returncode=result.returncode)
+
+    if failures:
+        logger.emit("run_finished", level="error", status="failed", failed_step=failures[0].step)
+        return 1
+
+    _write_state(config.state_file, session_count=session_count, run_id=logger.run_id, status="success")
+    logger.emit("run_finished", status="success", session_count=session_count)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    run_id = uuid.uuid4().hex[:12]
+    try:
+        config = parse_args(sys.argv[1:] if argv is None else argv)
+    except ValueError as exc:
+        print(f"CONFIG ERROR: {exc}", file=sys.stderr)
+        return 2
+    logger = JsonlLogger(config.log_file, run_id)
+    try:
+        return run(config, logger)
+    except Exception as exc:  # fail closed with a structured record before systemd sees exit 1
+        logger.emit("runner_exception", level="error", error=repr(exc))
+        logger.emit("run_finished", level="error", status="failed", reason="runner_exception")
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
