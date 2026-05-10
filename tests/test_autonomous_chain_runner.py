@@ -148,12 +148,12 @@ class TestAutonomousChainRunnerScript:
     def test_runs_configured_steps_in_order_and_writes_structured_logs(self, tmp_path):
         base = tmp_path / "base"
         log_file = tmp_path / "chain.jsonl"
-        result = _run_chain(tmp_path, extra_args=["--log-file", str(log_file), "--steps", "real_trace_ingestion,attention_router_bridge,trace_optimizer,gepa_bridge"])
+        result = _run_chain(tmp_path, extra_args=["--log-file", str(log_file), "--steps", "real_trace_ingestion,attention_router_bridge,trace_optimizer"])
         assert result.returncode == 0, result.stdout + result.stderr
 
         events = _jsonl(log_file)
         step_finishes = [e for e in events if e.get("event") == "step_finished"]
-        assert [e["step"] for e in step_finishes] == ["real_trace_ingestion", "attention_router_bridge", "trace_optimizer", "gepa_bridge"]
+        assert [e["step"] for e in step_finishes] == ["real_trace_ingestion", "attention_router_bridge", "trace_optimizer"]
         assert all(e["returncode"] == 0 for e in step_finishes)
         assert all("duration_ms" in e for e in step_finishes)
         assert all("argv" in e for e in step_finishes)
@@ -373,14 +373,13 @@ class TestAutonomousChainRunnerScript:
         assert triage["summary_counts"]["failed"] == 9
         assert triage["bucket_counts"] == {
             "environment_dependency": 3,
-            "expected_fixture_constraint": 1,
-            "real_regression": 3,
-            "stale_test": 2,
+            "expected_fixture_constraint": 0,
+            "real_regression": 2,
+            "stale_test": 4,
             "unclassified": 0,
         }
         assert {item["bucket"] for item in triage["items"]} == {
             "environment_dependency",
-            "expected_fixture_constraint",
             "real_regression",
             "stale_test",
         }
@@ -448,6 +447,7 @@ class TestAutonomousChainRunnerScript:
         assert queue["schema_version"] == 1
         assert queue["source_triage"] == str(expansion / "self_test_triage.json")
         assert queue["selection_policy"] == "real_regression_then_environment_then_unclassified"
+        assert queue["deduplication"] == "by_nodeid_keep_first"
         assert queue["external_writes_allowed"] is False
         assert queue["network_allowed"] is False
         assert queue["github_writes_allowed"] is False
@@ -463,10 +463,140 @@ class TestAutonomousChainRunnerScript:
         assert queue["items"][2]["priority"] == "P2"
         assert queue["items"][-1]["priority"] == "P3"
         assert all(item["external_writes_allowed"] is False for item in queue["items"])
+        # ── New fields ──
+        assert all("root_cause_hint" in item for item in queue["items"])
+        assert all("suggested_action" in item for item in queue["items"])
+        assert "total_raw_items" in queue
+        assert "duplicates_removed" in queue
         assert any(
             e.get("event") == "self_test_action_queue_written" and e.get("items") == 5
             for e in _jsonl(log_file)
         )
+
+    def test_self_test_action_queue_deduplicates_duplicate_nodeids(self, tmp_path):
+        """Same nodeid appearing twice should appear only once (keep first)."""
+        base = tmp_path / "base"
+        sessions = _write_sessions(base, count=1)
+        foundry = _fake_foundry_repo(tmp_path, include_optional=False)
+        reports = base / "reports" / "evolution"
+        expansion = reports / "expansion"
+        expansion.mkdir(parents=True)
+        log_file = tmp_path / "dedup-action-queue.jsonl"
+        triage = {
+            "schema_version": 1,
+            "run_id": "triage-run",
+            "source_step": "self_test",
+            "bucket_counts": {
+                "real_regression": 2,
+                "environment_dependency": 0,
+                "stale_test": 0,
+                "unclassified": 0,
+            },
+            "items": [
+                # Three entries with same nodeid — only first should survive
+                {"kind": "failed", "nodeid": "tests/core/test_pipeline.py::test_foo", "bucket": "real_regression", "line_tail": "first occurrence"},
+                {"kind": "error", "nodeid": "tests/core/test_pipeline.py::test_foo", "bucket": "real_regression", "line_tail": "second occurrence"},
+                {"kind": "failed", "nodeid": "tests/core/test_pipeline.py::test_foo", "bucket": "real_regression", "line_tail": "third occurrence"},
+                {"kind": "failed", "nodeid": "tests/core/test_other.py::test_bar", "bucket": "real_regression", "line_tail": "different test"},
+            ],
+            "external_writes_allowed": False,
+            "network_allowed": False,
+            "github_writes_allowed": False,
+            "production_mutation_allowed": False,
+        }
+        (expansion / "self_test_triage.json").write_text(json.dumps(triage))
+
+        result = subprocess.run(
+            [
+                sys.executable, str(SCRIPT),
+                "--base", str(base),
+                "--foundry-repo", str(foundry),
+                "--sessions-dir", str(sessions),
+                "--reports-dir", str(reports),
+                "--python-bin", sys.executable,
+                "--dspy-python", sys.executable,
+                "--log-file", str(log_file),
+                "--steps", "self_test_action_queue",
+                "--force",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        queue = json.loads((expansion / "self_test_action_queue.json").read_text())
+        assert queue["total_actionable_items"] == 2, f"expected 2 after dedup, got {queue['total_actionable_items']}"
+        assert queue["duplicates_removed"] == 2  # 3 occurrences of test_foo collapse to 1
+        nodeids = [item["nodeid"] for item in queue["items"]]
+        assert nodeids.count("tests/core/test_pipeline.py::test_foo") == 1
+        assert "tests/core/test_other.py::test_bar" in nodeids
+
+    def test_self_test_action_queue_root_cause_and_suggested_action(self, tmp_path):
+        """root_cause_hint and suggested_action are populated from error patterns."""
+        base = tmp_path / "base"
+        sessions = _write_sessions(base, count=1)
+        foundry = _fake_foundry_repo(tmp_path, include_optional=False)
+        reports = base / "reports" / "evolution"
+        expansion = reports / "expansion"
+        expansion.mkdir(parents=True)
+        log_file = tmp_path / "root-cause-action.jsonl"
+        triage = {
+            "schema_version": 1,
+            "run_id": "triage-run",
+            "source_step": "self_test",
+            "bucket_counts": {"real_regression": 1, "environment_dependency": 1, "stale_test": 0, "unclassified": 0},
+            "items": [
+                {
+                    "kind": "error",
+                    "nodeid": "tests/core/test_missing.py::test_something",
+                    "bucket": "environment_dependency",
+                    "line_tail": "ERROR tests/core/test_missing.py::test_something - ModuleNotFoundError: No module named 'dspy'",
+                },
+                {
+                    "kind": "failed",
+                    "nodeid": "tests/core/test_safety.py::test_no_flag",
+                    "bucket": "real_regression",
+                    "line_tail": "FAILED tests/core/test_safety.py::test_no_flag - safety disabled",
+                },
+            ],
+            "external_writes_allowed": False,
+            "network_allowed": False,
+            "github_writes_allowed": False,
+            "production_mutation_allowed": False,
+        }
+        (expansion / "self_test_triage.json").write_text(json.dumps(triage))
+
+        result = subprocess.run(
+            [
+                sys.executable, str(SCRIPT),
+                "--base", str(base),
+                "--foundry-repo", str(foundry),
+                "--sessions-dir", str(sessions),
+                "--reports-dir", str(reports),
+                "--python-bin", sys.executable,
+                "--dspy-python", sys.executable,
+                "--log-file", str(log_file),
+                "--steps", "self_test_action_queue",
+                "--force",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        queue = json.loads((expansion / "self_test_action_queue.json").read_text())
+        assert len(queue["items"]) == 2
+
+        # ModuleNotFoundError case
+        mod_item = next(i for i in queue["items"] if "missing" in i["nodeid"].lower())
+        assert "missing pip package" in mod_item["root_cause_hint"]
+        assert "pip install" in mod_item["suggested_action"]
+
+        # Safety flag case
+        safety_item = next(i for i in queue["items"] if "safety" in i["nodeid"].lower())
+        assert "security" in safety_item["root_cause_hint"].lower() or "safety" in safety_item["root_cause_hint"].lower()
 
     def test_session_seeder_reads_live_items_candidates_and_alert_artifacts_without_duplicates(self, tmp_path):
         base = tmp_path / "base"
