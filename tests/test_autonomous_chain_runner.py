@@ -315,7 +315,11 @@ class TestAutonomousChainRunnerScript:
             "print('ERROR tests/core/test_constraints.py::TestSizeConstraints::test_skill_under_limit')\n"
             "print('ERROR tests/core/test_v2_pipeline_integration.py::TestFullPipeline::test_pipeline_accepts_improvement')\n"
             "print('ERROR tests/core/test_bad_import.py::test_import - ModuleNotFoundError: No module named rich')\n"
-            "print('4 failed, 1 passed in 0.12s')\n"
+            "print('FAILED tests/core/test_trace_optimizer.py::TestTraceOptimizerCliSafetyFlags::test_missing_safety_flag_fails_closed[--no-network-network safety disabled]')\n"
+            "print('FAILED tests/core/test_capture_plugin.py::TestEndToEnd::test_deploy_updates_status')\n"
+            "print('FAILED tests/core/test_observatory_logger.py::TestSingleton::test_singleton_same_db')\n"
+            "print('FAILED tests/core/test_v2_dispatch.py::test_v2_dispatch_dry_run - FileNotFoundError: missing fixture')\n"
+            "print('8 failed, 1 passed in 0.12s')\n"
             "raise SystemExit(1)\n"
         )
         fake_pytest.chmod(0o755)
@@ -346,12 +350,12 @@ class TestAutonomousChainRunnerScript:
         assert triage["external_writes_allowed"] is False
         assert triage["source_step"] == "self_test"
         assert triage["pytest_returncode"] == 1
-        assert triage["summary_counts"]["failed"] == 4
+        assert triage["summary_counts"]["failed"] == 8
         assert triage["bucket_counts"] == {
-            "environment_dependency": 1,
+            "environment_dependency": 2,
             "expected_fixture_constraint": 1,
-            "real_regression": 1,
-            "stale_test": 1,
+            "real_regression": 3,
+            "stale_test": 2,
             "unclassified": 0,
         }
         assert {item["bucket"] for item in triage["items"]} == {
@@ -361,7 +365,7 @@ class TestAutonomousChainRunnerScript:
             "stale_test",
         }
         assert any(
-            e.get("event") == "self_test_triage_written" and e.get("items") == 4
+            e.get("event") == "self_test_triage_written" and e.get("items") == 8
             for e in _jsonl(log_file)
         )
 
