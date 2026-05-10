@@ -125,8 +125,11 @@ class TestValidateFoundryTraceOptimizer:
         assert exit_code == 1
 
     def test_real_drill_output_passes(self):
-        """Validate the actual optimize-drill output from earlier run."""
-        exit_code, output = _run_validator("/tmp/optimize-drill/trace_optimizer")
+        """Validate the actual optimize-drill output from earlier run, when present."""
+        drill_dir = Path("/tmp/optimize-drill/trace_optimizer")
+        if not drill_dir.is_dir():
+            pytest.skip(f"real drill output not available: {drill_dir}")
+        exit_code, output = _run_validator(str(drill_dir))
         assert exit_code == 0, f"Validator failed on real output: {output}"
 
 

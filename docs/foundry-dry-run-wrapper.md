@@ -277,3 +277,75 @@ Safety boundary:
 - `/var/lib/hermes/foundry` and `/var/lib/hermes/.hermes/sessions` are read-only
 - `/var/lib/hermes/reports/evolution` is the only persistent write path
 - `/var/lib/hermes/secrets` and `/var/lib/hermes/.hermes/.env` are inaccessible
+
+## Content evolution wrapper
+
+The content evolution wrapper runs Foundry's `evolution.skills.evolve_content` CLI for section-level skill rewriting. Unlike deterministic fixture wrappers, a real content-evolution run is LLM-backed: the wrapper records `network_allowed=true` in `wrapper_report.json`. It is still manual/default-off, has no GitHub write path, has no production mutation path, and writes only to its report directory.
+
+`evolve_content.py` CLI args studied for this wrapper:
+
+```text
+--skill <name>
+--eval-source synthetic|golden|sessiondb
+--dataset-path <optional dataset>
+--evaluator-model <model>
+--rewrite-model <model>
+--rewrite-budget <int>
+--hermes-repo <path>
+--weak-fraction <float>
+--dry-run
+```
+
+Manual dry-run validation:
+
+```bash
+FOUNDRY_CONTENT_SKILL=github-code-review \
+FOUNDRY_CONTENT_DRY_RUN=1 \
+  systemctl start hermes-evolution-foundry-content-evolution.service
+systemctl start hermes-validate-foundry-content-evolution.service
+```
+
+Manual real run:
+
+```bash
+FOUNDRY_CONTENT_SKILL=github-code-review \
+FOUNDRY_CONTENT_EVAL_SOURCE=synthetic \
+FOUNDRY_CONTENT_EVALUATOR_MODEL=minimax/minimax-m2.7 \
+FOUNDRY_CONTENT_REWRITE_MODEL=minimax/minimax-m2.7 \
+FOUNDRY_CONTENT_REWRITE_BUDGET=3 \
+FOUNDRY_CONTENT_WEAK_FRACTION=0.3333333333333333 \
+  systemctl start hermes-evolution-foundry-content-evolution.service
+systemctl start hermes-validate-foundry-content-evolution.service
+```
+
+Optional inputs:
+
+```bash
+FOUNDRY_CONTENT_DATASET_PATH=/var/lib/hermes/reports/evolution/gepa-bridge/datasets/github-code-review/holdout.jsonl
+FOUNDRY_CONTENT_HERMES_REPO=/var/lib/hermes/.hermes
+```
+
+Output is written under:
+
+```text
+/var/lib/hermes/reports/evolution/content-evolution
+```
+
+Expected wrapper artifacts:
+
+- `wrapper_report.json` — mechanical invocation/process/safety metadata
+- `evolved_skill.md` — copied from Foundry's timestamped `output/<skill>/content_*` directory for real runs
+- `baseline_skill.md` — copied baseline skill for real runs
+- `metrics.json` — copied Foundry metrics for real runs
+
+Safety boundary:
+
+- no timer is defined
+- no `wantedBy` auto-start target is defined
+- no `EnvironmentFile` or GitHub credential path is used
+- `/var/lib/hermes/foundry` and `/var/lib/hermes/.hermes` are read-only
+- `/var/lib/hermes/reports/evolution/content-evolution` is the only persistent write path
+- `/var/lib/hermes/secrets` and `/var/lib/hermes/.hermes/.env` are inaccessible
+- `network_allowed=true` only reflects the LLM call required by real content rewriting; dry-run records `network_allowed=false`
+
+The validator checks file existence, JSON parseability, `schema_version=1`, mode, process return code, expected artifact copies, and safety flags. It does not judge improvement quality, section selection, scores, or whether the evolved skill should be promoted.
