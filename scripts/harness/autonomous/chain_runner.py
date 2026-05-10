@@ -1089,10 +1089,34 @@ def _inproc_skill_manifest(config: Config, logger: JsonlLogger, required: bool) 
 
 
 def _python_for_venv(config: Config) -> str:
-    """Return the foundry venv python (has pytest/dspy), falling back to configured python."""
+    """Return a python that has both pytest and dspy.
+
+    Priority:
+    1. foundry-venv python (has dspy, check for pytest)
+    2. system env python from python3.withPackages (has pytest)
+    3. configured python_bin (fallback)
+    """
+    # Foundry venv has dspy but NOT pytest (only numpy/dspy installed there)
     venv_python = str(config.base / "foundry-venv" / "bin" / "python")
     if Path(venv_python).is_file():
-        return venv_python
+        # Verify it actually has pytest
+        proc = subprocess.run(
+            [venv_python, "-m", "pytest", "--version"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if proc.returncode == 0:
+            return venv_python
+
+    # System env python has pytest (from python3.withPackages([pytest]))
+    system_env_python = "/nix/store/087ia659qq60pw7jypn0mpi6dxjc51p3-python3-3.11.10-env/bin/python3"
+    if Path(system_env_python).is_file():
+        proc = subprocess.run(
+            [system_env_python, "-m", "pytest", "--version"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if proc.returncode == 0:
+            return system_env_python
+
     return config.python_bin
 
 
