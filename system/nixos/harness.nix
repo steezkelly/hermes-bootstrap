@@ -423,7 +423,7 @@ let
     Group = "hermes";
     UMask = "0007";
     Type = "oneshot";
-    TimeoutStartSec = "30s";
+    TimeoutStartSec = "5min";
     ProtectSystem = "strict";
     ProtectHome = true;
     ReadWritePaths = [
