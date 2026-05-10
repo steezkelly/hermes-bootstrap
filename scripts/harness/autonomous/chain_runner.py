@@ -1107,15 +1107,23 @@ def _python_for_venv(config: Config) -> str:
         if proc.returncode == 0:
             return venv_python
 
-    # System env python has pytest (from python3.withPackages([pytest]))
-    system_env_python = "/nix/store/087ia659qq60pw7jypn0mpi6dxjc51p3-python3-3.11.10-env/bin/python3"
-    if Path(system_env_python).is_file():
-        proc = subprocess.run(
-            [system_env_python, "-m", "pytest", "--version"],
-            capture_output=True, text=True, timeout=10,
-        )
-        if proc.returncode == 0:
-            return system_env_python
+    # System env python has pytest (from python3.withPackages([pytest])).
+    # These are per-rebuild derivations, so probe for any python3 env on the system.
+    env_python = subprocess.run(
+        ["find", "/nix/store", "-mindepth", "2", "-maxdepth", 3,
+         "-name", "python3", "-type", "f",
+         "-path", "*/python3-*-env/bin/python3"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if env_python.returncode == 0:
+        for candidate in env_python.stdout.strip().split("\n"):
+            if Path(candidate).is_file():
+                proc = subprocess.run(
+                    [candidate, "-m", "pytest", "--version"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if proc.returncode == 0:
+                    return candidate
 
     return config.python_bin
 
