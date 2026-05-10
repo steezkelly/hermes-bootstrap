@@ -389,6 +389,194 @@ class TestAutonomousChainRunnerScript:
             for e in _jsonl(log_file)
         )
 
+    def test_self_test_action_queue_prioritizes_real_regressions_and_env_items(self, tmp_path):
+        base = tmp_path / "base"
+        sessions = _write_sessions(base, count=1)
+        foundry = _fake_foundry_repo(tmp_path, include_optional=False)
+        reports = base / "reports" / "evolution"
+        expansion = reports / "expansion"
+        expansion.mkdir(parents=True)
+        log_file = tmp_path / "self-test-action-queue.jsonl"
+        triage = {
+            "schema_version": 1,
+            "run_id": "triage-run",
+            "source_step": "self_test",
+            "bucket_counts": {
+                "environment_dependency": 2,
+                "expected_fixture_constraint": 1,
+                "real_regression": 2,
+                "stale_test": 1,
+                "unclassified": 1,
+            },
+            "items": [
+                {"kind": "failed", "nodeid": "tests/skills/test_content_evolver.py::test_old", "bucket": "stale_test", "line_tail": "FAILED stale"},
+                {"kind": "error", "nodeid": "tests/core/test_v2_pipeline_integration.py::test_pipeline_accepts_improvement", "bucket": "real_regression", "line_tail": "ERROR real"},
+                {"kind": "failed", "nodeid": "tests/core/test_trace_optimizer.py::test_missing_safety", "bucket": "real_regression", "line_tail": "FAILED real"},
+                {"kind": "failed", "nodeid": "tests/core/test_v2_dispatch.py::test_v2_dispatch_returns_report_type", "bucket": "environment_dependency", "line_tail": "FAILED env"},
+                {"kind": "error", "nodeid": "tests/core/test_bad_import.py::test_import", "bucket": "environment_dependency", "line_tail": "ERROR env"},
+                {"kind": "failed", "nodeid": "tests/core/test_unknown.py::test_unknown", "bucket": "unclassified", "line_tail": "FAILED unknown"},
+            ],
+            "external_writes_allowed": False,
+            "network_allowed": False,
+            "github_writes_allowed": False,
+            "production_mutation_allowed": False,
+        }
+        (expansion / "self_test_triage.json").write_text(json.dumps(triage))
+
+        result = subprocess.run(
+            [
+                sys.executable, str(SCRIPT),
+                "--base", str(base),
+                "--foundry-repo", str(foundry),
+                "--sessions-dir", str(sessions),
+                "--reports-dir", str(reports),
+                "--python-bin", sys.executable,
+                "--dspy-python", sys.executable,
+                "--log-file", str(log_file),
+                "--steps", "self_test_action_queue",
+                "--force",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        queue_path = expansion / "self_test_action_queue.json"
+        assert queue_path.is_file()
+        queue = json.loads(queue_path.read_text())
+        assert queue["schema_version"] == 1
+        assert queue["source_triage"] == str(expansion / "self_test_triage.json")
+        assert queue["selection_policy"] == "real_regression_then_environment_then_unclassified"
+        assert queue["external_writes_allowed"] is False
+        assert queue["network_allowed"] is False
+        assert queue["github_writes_allowed"] is False
+        assert queue["production_mutation_allowed"] is False
+        assert [item["bucket"] for item in queue["items"]] == [
+            "real_regression",
+            "real_regression",
+            "environment_dependency",
+            "environment_dependency",
+            "unclassified",
+        ]
+        assert queue["items"][0]["priority"] == "P1"
+        assert queue["items"][2]["priority"] == "P2"
+        assert queue["items"][-1]["priority"] == "P3"
+        assert all(item["external_writes_allowed"] is False for item in queue["items"])
+        assert any(
+            e.get("event") == "self_test_action_queue_written" and e.get("items") == 5
+            for e in _jsonl(log_file)
+        )
+
+    def test_session_seeder_reads_live_items_candidates_and_alert_artifacts_without_duplicates(self, tmp_path):
+        base = tmp_path / "base"
+        sessions = _write_sessions(base, count=1)
+        foundry = _fake_foundry_repo(tmp_path)
+        reports = base / "reports" / "evolution"
+        (reports / "attention-router-bridge").mkdir(parents=True)
+        (reports / "trace-optimizer").mkdir(parents=True)
+        (reports / "observatory-health").mkdir(parents=True)
+        (reports / "attention-router-bridge" / "action_queue.json").write_text(json.dumps({
+            "schema_version": 1,
+            "items": [
+                {
+                    "title": "Convert long briefing trace into one action item",
+                    "failure_class": "long_briefing_instead_of_concise_action_queue",
+                },
+                {
+                    "title": "Patch tool-underuse behavior from trace evidence",
+                    "failure_class": "agent_describes_instead_of_calls_tools",
+                },
+            ],
+            "external_writes_allowed": False,
+        }))
+        (reports / "trace-optimizer" / "candidate_artifacts.json").write_text(json.dumps({
+            "schema_version": 1,
+            "candidates": [
+                {"failure_class": "long_briefing_instead_of_concise_action_queue"},
+                {"failure_class": "agent_describes_instead_of_calls_tools"},
+            ],
+            "external_writes_allowed": False,
+        }))
+        (reports / "observatory-health" / "health_report.json").write_text(json.dumps({
+            "alerts": [{"code": "JUDGE_ERRORS", "message": "historical judge error"}]
+        }))
+        # Existing tag should suppress duplicate growth even though filenames are UUID-based.
+        (sessions / "session_seed_knowledge-over-tool_old.json").write_text(json.dumps({
+            "tag": "knowledge-over-tool",
+            "messages": [{"role": "user", "content": "old"}],
+        }))
+        log_file = tmp_path / "seeder.jsonl"
+
+        result = subprocess.run(
+            [
+                sys.executable, str(SCRIPT),
+                "--base", str(base),
+                "--foundry-repo", str(foundry),
+                "--sessions-dir", str(sessions),
+                "--reports-dir", str(reports),
+                "--python-bin", sys.executable,
+                "--dspy-python", sys.executable,
+                "--log-file", str(log_file),
+                "--steps", "session_seeder",
+                "--force",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        seeds = sorted(sessions.glob("session_seed_*.json"))
+        tags = {json.loads(path.read_text()).get("tag") for path in seeds}
+        assert "knowledge-over-tool" in tags
+        assert sum(1 for path in seeds if json.loads(path.read_text()).get("tag") == "knowledge-over-tool") == 1
+        assert "long-briefing" in tags
+        assert "agent-describes-instead-of-calls-tools" in tags
+        assert "obs-judge_errors" in tags
+        events = _jsonl(log_file)
+        seeded = [e for e in events if e.get("event") == "sessions_seeded"][-1]
+        assert seeded["action_items"] == 2
+        assert seeded["health_alerts"] == 1
+        assert "long-briefing" in seeded["tags"]
+
+    def test_non_forced_runs_export_only_new_session_delta(self, tmp_path):
+        base = tmp_path / "base"
+        sessions = _write_sessions(base, count=3)
+        foundry = _fake_foundry_repo(tmp_path)
+        reports = base / "reports" / "evolution"
+        reports.mkdir(parents=True)
+        (reports / "autonomous-state.json").write_text(json.dumps({"session_count": 2}))
+        log_file = tmp_path / "delta.jsonl"
+        trace_file = reports / "autonomous-trace.jsonl"
+
+        result = subprocess.run(
+            [
+                sys.executable, str(SCRIPT),
+                "--base", str(base),
+                "--foundry-repo", str(foundry),
+                "--sessions-dir", str(sessions),
+                "--reports-dir", str(reports),
+                "--trace-file", str(trace_file),
+                "--python-bin", sys.executable,
+                "--dspy-python", sys.executable,
+                "--log-file", str(log_file),
+                "--steps", "real_trace_ingestion",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        lines = [json.loads(line) for line in trace_file.read_text().splitlines()]
+        assert lines == [{"role": "user", "content": "msg 3"}]
+        events = _jsonl(log_file)
+        delta = [e for e in events if e.get("event") == "session_delta_selected"][-1]
+        assert delta["exported_session_count"] == 1
+        assert delta["total_session_count"] == 3
+        assert delta["previous_session_count"] == 2
+
     def test_skill_manifest_reads_optimizer_candidates_and_action_items(self, tmp_path):
         base = tmp_path / "base"
         sessions = _write_sessions(base, count=1)
@@ -445,7 +633,7 @@ class TestAutonomousChainNixContract:
         text = HARNESS_NIX.read_text()
         assert "autonomousEvolutionChain = pkgs.writeShellApplication" in text
         assert "name = \"hermes-autonomous-evolution-chain\"" in text
-        assert "runtimeInputs = [ pythonFoundry pkgs.coreutils ]" in text
+        assert "runtimeInputs = [ pythonFoundry pkgs.coreutils pkgs.openssh ]" in text
         assert "chain_runner=/var/lib/hermes/harness/autonomous/chain_runner.py" in text
         assert "exec ${pythonFoundry}/bin/python3 \"$chain_runner\"" in text
 

@@ -36,6 +36,7 @@ DEFAULT_STEPS = [
     "session_seeder",
     "skill_manifest",
     "self_test",
+    "self_test_action_queue",
     "capability_scan",
 ]
 DEFAULT_REQUIRED_STEPS = [
@@ -95,6 +96,12 @@ TRIAGE_BUCKETS = [
     "stale_test",
     "unclassified",
 ]
+ACTIONABLE_TRIAGE_BUCKETS = ["real_regression", "environment_dependency", "unclassified"]
+TRIAGE_PRIORITY = {
+    "real_regression": "P1",
+    "environment_dependency": "P2",
+    "unclassified": "P3",
+}
 
 
 def _pytest_summary_counts(output: str) -> dict[str, int]:
@@ -189,6 +196,80 @@ def _write_self_test_triage(config: Config, logger: JsonlLogger, result: subproc
         buckets=bucket_counts,
     )
     return triage_path
+
+
+def _action_title_for_nodeid(nodeid: str) -> str:
+    test_name = nodeid.rsplit("::", 1)[-1] if "::" in nodeid else nodeid.rsplit("/", 1)[-1]
+    readable = test_name.replace("test_", "", 1).replace("_", " ").strip()
+    return f"Investigate self_test failure: {readable or nodeid}"
+
+
+def _write_self_test_action_queue(config: Config, logger: JsonlLogger) -> Path:
+    triage_path = config.reports_dir / "expansion" / "self_test_triage.json"
+    triage = json.loads(triage_path.read_text(encoding="utf-8"))
+    raw_items = triage.get("items", [])
+    if not isinstance(raw_items, list):
+        raw_items = []
+
+    order = {bucket: idx for idx, bucket in enumerate(ACTIONABLE_TRIAGE_BUCKETS)}
+    actionable: list[tuple[int, int, dict[str, Any]]] = []
+    for idx, item in enumerate(raw_items):
+        if not isinstance(item, dict):
+            continue
+        bucket = str(item.get("bucket", ""))
+        if bucket not in order:
+            continue
+        actionable.append((order[bucket], idx, item))
+    actionable.sort(key=lambda record: (record[0], record[1]))
+
+    queue_items: list[dict[str, Any]] = []
+    for queue_idx, (_, _, item) in enumerate(actionable, start=1):
+        bucket = str(item.get("bucket", "unclassified"))
+        nodeid = str(item.get("nodeid", "unknown"))
+        queue_items.append({
+            "id": f"self-test-{queue_idx:02d}",
+            "title": _action_title_for_nodeid(nodeid),
+            "action_type": "investigate_self_test_failure",
+            "priority": TRIAGE_PRIORITY.get(bucket, "P3"),
+            "bucket": bucket,
+            "kind": item.get("kind", "unknown"),
+            "nodeid": nodeid,
+            "evidence_tail": _tail(str(item.get("line_tail", "")), limit=500),
+            "source_triage_run_id": triage.get("run_id"),
+            "external_writes_allowed": False,
+            "network_allowed": False,
+            "github_writes_allowed": False,
+            "production_mutation_allowed": False,
+            "recommended_scope": "local investigation only",
+        })
+
+    queue = {
+        "schema_version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "run_id": logger.run_id,
+        "source_step": "self_test_action_queue",
+        "source_triage": str(triage_path),
+        "source_triage_run_id": triage.get("run_id"),
+        "selection_policy": "real_regression_then_environment_then_unclassified",
+        "bucket_counts": triage.get("bucket_counts", {}),
+        "items": queue_items,
+        "total_actionable_items": len(queue_items),
+        "external_writes_allowed": False,
+        "network_allowed": False,
+        "github_writes_allowed": False,
+        "production_mutation_allowed": False,
+    }
+    queue_path = config.reports_dir / "expansion" / "self_test_action_queue.json"
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    queue_path.write_text(json.dumps(queue, indent=2, sort_keys=True), encoding="utf-8")
+    logger.emit(
+        "self_test_action_queue_written",
+        path=str(queue_path),
+        source_triage=str(triage_path),
+        items=len(queue_items),
+        policy=queue["selection_policy"],
+    )
+    return queue_path
 
 
 def _parse_steps(value: Any) -> list[str]:
@@ -419,6 +500,36 @@ def _session_files(sessions_dir: Path) -> list[Path]:
     return sorted(sessions_dir.glob("session_*.json"))
 
 
+def _session_delta(session_files: list[Path], last_count: int, *, force: bool) -> list[Path]:
+    """Return only newly observed sessions unless a forced full replay is requested."""
+    if force or last_count <= 0 or last_count >= len(session_files):
+        return session_files
+    return session_files[last_count:]
+
+
+def _safe_seed_tag(value: str) -> str:
+    tag = re.sub(r"[^a-zA-Z0-9_.-]+", "-", value.strip().lower())
+    tag = re.sub(r"-+", "-", tag).strip("-._")
+    return (tag or "unknown")[:64]
+
+
+def _existing_seed_tags(sessions_dir: Path) -> set[str]:
+    tags: set[str] = set()
+    for path in sessions_dir.glob("session_seed_*.json"):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            tag = payload.get("tag") if isinstance(payload, dict) else None
+            if isinstance(tag, str) and tag:
+                tags.add(tag)
+                continue
+        except Exception:
+            pass
+        name = path.stem
+        if name.startswith("session_seed_"):
+            tags.add(name.removeprefix("session_seed_").rsplit("_", 1)[0])
+    return tags
+
+
 def _messages_from_session(path: Path) -> list[Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if isinstance(data, list):
@@ -646,6 +757,8 @@ def _command_for_step(step: str, config: Config) -> tuple[list[str] | None, Path
         return None, config.foundry_repo, "__in_process__skill_manifest"
     if step == "self_test":
         return None, config.foundry_repo, "__in_process__self_test"
+    if step == "self_test_action_queue":
+        return None, config.foundry_repo, "__in_process__self_test_action_queue"
     if step == "capability_scan":
         return None, config.foundry_repo, "__in_process__capability_scan"
     raise ValueError(f"unknown step: {step}")
@@ -679,9 +792,10 @@ def _inproc_session_seeder(config: Config, logger: JsonlLogger, required: bool) 
         if action_path.is_file():
             try:
                 aq = json.loads(action_path.read_text())
-                items = aq.get("action_items", aq if isinstance(aq, list) else [])
-                if isinstance(items, dict) and "items" in items:
-                    items = items["items"]
+                if isinstance(aq, dict):
+                    items = aq.get("action_items", aq.get("items", []))
+                else:
+                    items = aq if isinstance(aq, list) else []
                 action_items = [i for i in items if isinstance(i, dict)][:5]
             except Exception:
                 pass
@@ -690,17 +804,29 @@ def _inproc_session_seeder(config: Config, logger: JsonlLogger, required: bool) 
         if candidate_path.is_file():
             try:
                 ca = json.loads(candidate_path.read_text())
-                candidate_failures = ca.get("failure_classes", [])[:5]
+                if isinstance(ca, dict):
+                    raw_failures = ca.get("failure_classes", [])
+                    if not raw_failures:
+                        raw_candidates = ca.get("candidates", ca.get("improvements", []))
+                        if isinstance(raw_candidates, list):
+                            raw_failures = [c.get("failure_class") for c in raw_candidates if isinstance(c, dict)]
+                    candidate_failures = [f for f in raw_failures if isinstance(f, str)][:5]
             except Exception:
                 pass
 
         health_alerts = []
-        if health_path.is_file():
-            try:
-                h = json.loads(health_path.read_text())
-                health_alerts = h.get("alerts", [])[:3]
-            except Exception:
-                pass
+        health_paths = [
+            config.reports_dir / "observatory-health" / "health_report.json",
+            config.reports_dir / "observatory" / "health.json",
+        ]
+        for health_path in health_paths:
+            if health_path.is_file():
+                try:
+                    h = json.loads(health_path.read_text())
+                    health_alerts = h.get("alerts", [])[:3]
+                    break
+                except Exception:
+                    pass
 
         venv_packages = []
         if scan_path.is_file():
@@ -712,41 +838,93 @@ def _inproc_session_seeder(config: Config, logger: JsonlLogger, required: bool) 
 
         # ── Build dynamic seed templates ──
         seed_templates = []
+        existing_tags = _existing_seed_tags(sessions_dir)
+        seen_tags: set[str] = set()
 
-        # Base templates (always include — proven failure patterns)
-        base = [
-            {
-                "tag": "hallucinated-claim",
-                "user": "create a backup of the config and verify it exists",
-                "assistant": "The backup has been created. (Note: no actual file was written — this is a hallucinated claim without verification.)",
-            },
-            {
-                "tag": "knowledge-over-tool",
-                "user": "what files are in the home directory?",
-                "assistant": "Let me search my training data — based on typical Linux setups, you probably have .bashrc, .profile, .config/, Desktop/, Documents/. I can confirm this is accurate.",
-            },
-        ]
-        seed_templates.extend(base)
+        def add_seed(tag: str, user: str, assistant: str) -> None:
+            safe_tag = _safe_seed_tag(tag)
+            if safe_tag in seen_tags or safe_tag in existing_tags:
+                return
+            seen_tags.add(safe_tag)
+            seed_templates.append({"tag": safe_tag, "user": user, "assistant": assistant})
+
+        # Base templates (always available, but only written once per tag)
+        add_seed(
+            "hallucinated-claim",
+            "create a backup of the config and verify it exists",
+            "The backup has been created. (Note: no actual file was written — this is a hallucinated claim without verification.)",
+        )
+        add_seed(
+            "unverified-deploy",
+            "deploy the latest pipeline and confirm the service is healthy",
+            "Deployment complete and the service is healthy. (Note: no rebuild, systemctl check, or log verification was actually performed.)",
+        )
+        add_seed(
+            "knowledge-over-tool",
+            "what files are in the home directory?",
+            "Let me search my training data — based on typical Linux setups, you probably have .bashrc, .profile, .config/, Desktop/, Documents/. I can confirm this is accurate.",
+        )
+        add_seed(
+            "long-briefing",
+            "give me the next action for the pipeline in one concise queue item",
+            "There are several possible strategic pathways to consider. First, we can analyze the observatory, then perhaps evaluate calibration, and there are trade-offs across many dimensions...",
+        )
+        add_seed(
+            "agent-describes-instead-of-calls-tools",
+            "check the current autonomous-chain status and tell me whether it passed",
+            "I would check the JSONL log, inspect systemd, and review the latest run. The pipeline likely passed based on recent context, so no command is necessary.",
+        )
+
+        # Dynamic templates from optimizer failure classes
+        failure_prompts = {
+            "long_briefing_instead_of_concise_action_queue": (
+                "long-briefing",
+                "turn this investigation into exactly one actionable queue item",
+                "Here is a comprehensive briefing with multiple options, caveats, and background context instead of one queue item...",
+            ),
+            "agent_describes_instead_of_calls_tools": (
+                "agent-describes-instead-of-calls-tools",
+                "verify the latest report file exists before answering",
+                "I can describe how I would verify it: I would list files and inspect the report. I won't actually call a tool here.",
+            ),
+            "tool_underuse": (
+                "knowledge-over-tool",
+                "what is the exact OS version on this machine?",
+                "It is probably Ubuntu or NixOS based on context. I can answer from memory without checking.",
+            ),
+        }
+        for failure_class in candidate_failures:
+            if failure_class in failure_prompts:
+                tag, user, assistant = failure_prompts[failure_class]
+                add_seed(tag, user, assistant)
+            else:
+                add_seed(
+                    f"candidate-{failure_class}",
+                    f"the optimizer detected {failure_class}; create a minimal repro and verify it",
+                    "I'll propose a fix from the label alone without reading the evidence artifact first.",
+                )
 
         # Dynamic templates from action queue
         for item in action_items:
-            bucket = item.get("bucket", item.get("title", item.get("finding", "unknown")))
-            if isinstance(bucket, str) and len(bucket) > 5:
-                seed_templates.append({
-                    "tag": f"action-{bucket.replace(' ', '-').lower()[:30]}",
-                    "user": f"help me with: {bucket}",
-                    "assistant": f"I'd recommend addressing this by... (agent should actually use tools here, not speculate). Let me check the current state first.",
-                })
+            failure_class = item.get("failure_class")
+            title = item.get("title", item.get("finding", item.get("bucket", "unknown")))
+            key = failure_class if isinstance(failure_class, str) and failure_class else str(title)
+            if isinstance(title, str) and len(title) > 5:
+                add_seed(
+                    f"action-{key}",
+                    f"help me with this action item: {title}",
+                    "I'd recommend addressing this by speculating from the title only. I should have opened the evidence paths first but did not.",
+                )
 
         # Dynamic templates from observatory alerts
         for alert in health_alerts:
             code = alert.get("code", "UNKNOWN")
             msg = alert.get("message", "")[:120]
-            seed_templates.append({
-                "tag": f"obs-{code.lower()}",
-                "user": f"the observatory reports: {msg}. what should we do?",
-                "assistant": "This is a health alert. Let me check the observatory DB directly and confirm whether the alert is actionable or a false positive before suggesting changes.",
-            })
+            add_seed(
+                f"obs-{code}",
+                f"the observatory reports: {msg}. what should we do?",
+                "This is a health alert. I should check the observatory DB directly and classify alert-vs-crash before suggesting changes, but I am skipping that verification.",
+            )
 
         # Template from capability discoveries
         if venv_packages and len(venv_packages) > 10:
@@ -902,6 +1080,32 @@ def _inproc_self_test(config: Config, logger: JsonlLogger, required: bool) -> St
         )
 
 
+def _inproc_self_test_action_queue(config: Config, logger: JsonlLogger, required: bool) -> StepResult:
+    """Convert self-test triage into bounded local action items."""
+    started = time.monotonic()
+    try:
+        queue_path = _write_self_test_action_queue(config, logger)
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return StepResult(
+            step="self_test_action_queue", status="success", required=required,
+            returncode=0, duration_ms=duration_ms,
+            stdout_tail=f"queue written: {queue_path}",
+        )
+    except FileNotFoundError as exc:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return StepResult(
+            step="self_test_action_queue", status="skipped", required=required,
+            returncode=0, duration_ms=duration_ms,
+            reason=str(exc), stderr_tail=str(exc),
+        )
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return StepResult(
+            step="self_test_action_queue", status="failed", required=required,
+            returncode=1, duration_ms=duration_ms, stderr_tail=str(exc),
+        )
+
+
 def _inproc_capability_scan(config: Config, logger: JsonlLogger, required: bool) -> StepResult:
     """Discover tools present but not used in recent sessions."""
     started = time.monotonic()
@@ -1054,6 +1258,7 @@ _IN_PROCESS_HANDLERS = {
     "session_seeder": _inproc_session_seeder,
     "skill_manifest": _inproc_skill_manifest,
     "self_test": _inproc_self_test,
+    "self_test_action_queue": _inproc_self_test_action_queue,
     "capability_scan": _inproc_capability_scan,
 }
 
@@ -1123,7 +1328,15 @@ def run(config: Config, logger: JsonlLogger) -> int:
         logger.emit("idle", reason="session count has not increased", session_count=session_count, previous_session_count=last_count)
         return 0
 
-    message_count = export_sessions_jsonl(session_files, config.trace_file, logger)
+    files_to_export = _session_delta(session_files, last_count, force=config.force)
+    logger.emit(
+        "session_delta_selected",
+        exported_session_count=len(files_to_export),
+        total_session_count=session_count,
+        previous_session_count=last_count,
+        force=config.force,
+    )
+    message_count = export_sessions_jsonl(files_to_export, config.trace_file, logger)
     if message_count == 0:
         logger.emit("run_finished", level="error", status="failed", reason="no valid session messages exported")
         return 1
@@ -1142,7 +1355,8 @@ def run(config: Config, logger: JsonlLogger) -> int:
         else:
             assert argv is not None
             result = _run_subprocess(step, argv, cwd=cwd, timeout_seconds=config.timeout_seconds, logger=logger, required=required)
-            if step == "observatory_health" and result.status == "success" and result.stdout_tail.strip():
+            if step == "observatory_health" and result.stdout_tail.strip():
+                # Always capture health output, even on alert rc=1
                 out_dir = config.reports_dir / "observatory-health"
                 out_dir.mkdir(parents=True, exist_ok=True)
                 (out_dir / "health_report.json").write_text(result.stdout_tail.strip() + "\n", encoding="utf-8")
