@@ -476,6 +476,8 @@ in
     deps = [ "users" ];
     text = ''
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/harness
+      ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/harness/autonomous
+      ${pkgs.coreutils}/bin/install -o hermes-harness -g hermes -m 0755 ${harnessDir}/autonomous/chain_runner.py /var/lib/hermes/harness/autonomous/chain_runner.py
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/events
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports
       ${pkgs.coreutils}/bin/install -d -o hermes-harness -g hermes -m 2770 /var/lib/hermes/reports/daily
@@ -915,9 +917,11 @@ in
     after = [ "hermes-agent.service" ];
     serviceConfig = commonServiceConfig // {
       ExecStart = "${autonomousEvolutionChain}/bin/hermes-autonomous-evolution-chain";
+      Environment = [ "NIX_LD_LIBRARY_PATH=/run/current-system/sw/share/nix-ld/lib" ];
       ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution" ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/foundry"
+        "/var/lib/hermes/foundry-venv"
         "/var/lib/hermes/.hermes/sessions"
       ];
       InaccessiblePaths = lib.mkForce [
