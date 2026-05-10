@@ -1110,7 +1110,7 @@ def _python_for_venv(config: Config) -> str:
     # System env python has pytest (from python3.withPackages([pytest])).
     # These are per-rebuild derivations, so probe for any python3 env on the system.
     env_python = subprocess.run(
-        ["find", "/nix/store", "-mindepth", "2", "-maxdepth", 3,
+        ["find", "/nix/store", "-mindepth", "2", "-maxdepth", "3",
          "-name", "python3", "-type", "f",
          "-path", "*/python3-*-env/bin/python3"],
         capture_output=True, text=True, timeout=30,
