@@ -917,15 +917,20 @@ in
     description = "Run autonomous evolution chain on detected sessions";
     after = [ "hermes-agent.service" ];
     serviceConfig = commonServiceConfig // {
+      User = "hermes";
+      Group = "hermes";
       ExecStart = "${autonomousEvolutionChain}/bin/hermes-autonomous-evolution-chain";
       Environment = [ "NIX_LD_LIBRARY_PATH=/run/current-system/sw/share/nix-ld/lib" ];
       ReadWritePaths = lib.mkForce [
         "/var/lib/hermes/reports/evolution"
         "/var/lib/hermes/.hermes/sessions"
+        "/var/lib/hermes/messages"
+        "/var/lib/hermes/cache"
       ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/foundry"
         "/var/lib/hermes/foundry-venv"
+        "/var/lib/hermes/.ssh"
       ];
       InaccessiblePaths = lib.mkForce [
         "-/var/lib/hermes/secrets"
