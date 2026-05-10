@@ -935,8 +935,8 @@ in
     description = "Fire autonomous evolution chain every 30 minutes";
     wantedBy = [ "timers.target" ];
     timerConfig = {
-      OnBootSec = "2min";
-      OnUnitActiveSec = "30min";
+      OnBootSec = "1min";
+      OnUnitActiveSec = "3min";
     };
   };
   # Weekly dry-run of the full evolution pipeline: run all fixtures,

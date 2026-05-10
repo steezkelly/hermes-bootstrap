@@ -40,7 +40,7 @@
 
   # LLM defaults. Credentials live in secretsEnvFile, not in this file.
   provider = "minimax";
-  model = "minimax-m2.7";
+  model = "minimax-m2.7-highspeed";
 
   # Local gateway. Keep this bound to localhost unless you add TLS/auth/reverse proxy hardening.
   gatewayHost = "127.0.0.1";

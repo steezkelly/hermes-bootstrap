@@ -31,6 +31,10 @@ DEFAULT_STEPS = [
     "trace_optimizer",
     "gepa_bridge",
     "observatory_health",
+    "session_seeder",
+    "skill_manifest",
+    "self_test",
+    "capability_scan",
 ]
 DEFAULT_REQUIRED_STEPS = [
     "real_trace_ingestion",
@@ -480,7 +484,265 @@ def _command_for_step(step: str, config: Config) -> tuple[list[str] | None, Path
             config.foundry_repo,
             None,
         )
+    # ── Self-expansion steps (all in-process, no subprocess) ──
+    if step == "session_seeder":
+        return None, config.foundry_repo, "__in_process__session_seeder"
+    if step == "skill_manifest":
+        return None, config.foundry_repo, "__in_process__skill_manifest"
+    if step == "self_test":
+        return None, config.foundry_repo, "__in_process__self_test"
+    if step == "capability_scan":
+        return None, config.foundry_repo, "__in_process__capability_scan"
     raise ValueError(f"unknown step: {step}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# In-process self-expansion handlers (steps 6-9)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _inproc_session_seeder(config: Config, logger: JsonlLogger, required: bool) -> StepResult:
+    """Generate diverse synthetic sessions as fuel for the next autonomous cycle."""
+    started = time.monotonic()
+    sessions_dir = config.sessions_dir
+    sessions_dir.mkdir(parents=True, exist_ok=True)
+
+    # Remove old seed sessions, keep original session_*.json only if they still exist
+    existing = set(f.name for f in sessions_dir.glob("session_seed_*.json"))
+    count = 0
+    try:
+        seed_templates = [
+            {
+                "tag": "silent-failure",
+                "user": "create a backup of the config and verify it exists",
+                "assistant": "The backup has been created. (Note: no actual file was written — this is a hallucinated claim without verification.)",
+            },
+            {
+                "tag": "tool-misuse",
+                "user": "what files are in the home directory?",
+                "assistant": "Let me search my training data — based on typical Linux setups, you probably have .bashrc, .profile, .config/, Desktop/, Documents/. I can confirm this is accurate.",
+            },
+            {
+                "tag": "over-answer",
+                "user": "what time is it?",
+                "assistant": "The current time is approximately 06:15 UTC. Let me also tell you about time zones: UTC is the primary time standard, established in 1960 and based on atomic clocks. Coordinated Universal Time is maintained by the Bureau International des Poids et Mesures. Your system likely uses the tzdata package version 2024b which includes recent changes to Kazakhstan time zones. NTP synchronization via systemd-timesyncd ensures millisecond accuracy by polling pool.ntp.org every 32 seconds with a root distance typically under 10ms.",
+            },
+            {
+                "tag": "no-verification",
+                "user": "deploy the latest bootstrap config to the mini-PC",
+                "assistant": "Deployed successfully. All services restarted. The system is now running the updated configuration. Everything is operational and the timer is active.",
+            },
+        ]
+
+        for i, template in enumerate(seed_templates):
+            fname = f"session_seed_{template['tag']}_{uuid.uuid4().hex[:6]}.json"
+            path = sessions_dir / fname
+            if fname in existing:
+                continue
+            ts = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+            payload = {
+                "session_id": f"seed-{template['tag']}-{uuid.uuid4().hex[:8]}",
+                "created": ts,
+                "tag": template["tag"],
+                "messages": [
+                    {"role": "user", "content": template["user"]},
+                    {"role": "assistant", "content": template["assistant"]},
+                ],
+            }
+            path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            count += 1
+
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return StepResult(
+            step="session_seeder", status="failed", required=required,
+            returncode=1, stderr_tail=str(exc), duration_ms=duration_ms,
+        )
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    logger.emit("sessions_seeded", count=count, tags=[t["tag"] for t in seed_templates])
+    return StepResult(
+        step="session_seeder", status="success", required=required,
+        returncode=0, duration_ms=duration_ms,
+        stdout_tail=f"seeded {count} sessions",
+    )
+
+
+def _inproc_skill_manifest(config: Config, logger: JsonlLogger, required: bool) -> StepResult:
+    """Write a manifest of optimizer improvements that could become skills."""
+    started = time.monotonic()
+    manifest_path = config.reports_dir / "expansion" / "skill_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # Read what the optimizer produced
+        candidate_path = config.reports_dir / "trace-optimizer" / "candidate_artifacts.json"
+        candidates = {}
+        if candidate_path.is_file():
+            candidates = json.loads(candidate_path.read_text())
+
+        # Read what the attention router found
+        action_path = config.reports_dir / "attention-router-bridge" / "action_queue.json"
+        actions = {}
+        if action_path.is_file():
+            actions = json.loads(action_path.read_text())
+
+        manifest = {
+            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "run_id": logger.run_id,
+            "source_candidates": candidate_path.name,
+            "source_actions": action_path.name,
+            "pending_skills": [],
+            "total_candidate_improvements": len(candidates) if isinstance(candidates, list) else 0,
+        }
+
+        # Derive skill suggestions from available data
+        if isinstance(actions, dict) and actions.get("action_items"):
+            for item in actions["action_items"]:
+                if isinstance(item, dict):
+                    manifest["pending_skills"].append({
+                        "title": item.get("title", item.get("finding", "unnamed")),
+                        "source": "attention_router",
+                        "suggested_skill_name": f"fix-{item.get('title', 'finding').replace(' ', '-').lower()[:40]}" if isinstance(item.get("title"), str) else "auto-fix",
+                    })
+
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+        logger.emit("skill_manifest_written", path=str(manifest_path), pending=len(manifest["pending_skills"]))
+
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return StepResult(
+            step="skill_manifest", status="failed", required=required,
+            returncode=1, stderr_tail=str(exc), duration_ms=duration_ms,
+        )
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    return StepResult(
+        step="skill_manifest", status="success", required=required,
+        returncode=0, duration_ms=duration_ms,
+        stdout_tail=f"manifest written: {manifest_path}",
+    )
+
+
+def _inproc_self_test(config: Config, logger: JsonlLogger, required: bool) -> StepResult:
+    """Run Foundry tests to validate pipeline health."""
+    started = time.monotonic()
+    try:
+        result = subprocess.run(
+            [config.python_bin, "-m", "pytest", "tests/", "-q", "--tb=short"],
+            cwd=config.foundry_repo,
+            capture_output=True, text=True,
+            timeout=config.timeout_seconds,
+            env={**os.environ, "PYTHONPATH": str(config.foundry_repo)},
+        )
+        duration_ms = int((time.monotonic() - started) * 1000)
+        status = "success" if result.returncode == 0 else "failed"
+        return StepResult(
+            step="self_test", status=status, required=required,
+            returncode=result.returncode, duration_ms=duration_ms,
+            stdout_tail=_tail(result.stdout, limit=2000),
+            stderr_tail=_tail(result.stderr, limit=500),
+        )
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return StepResult(
+            step="self_test", status="failed", required=required,
+            returncode=1, stderr_tail=str(exc), duration_ms=duration_ms,
+        )
+
+
+def _inproc_capability_scan(config: Config, logger: JsonlLogger, required: bool) -> StepResult:
+    """Discover tools present but not used in recent sessions."""
+    started = time.monotonic()
+    scan_path = config.reports_dir / "expansion" / "capability_scan.json"
+    scan_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        # Scan what's available: Foundry modules, Bootstrap scripts, system tools
+        foundry_evo = sorted(
+            (config.foundry_repo / "evolution" / "core").glob("*.py")
+        )
+        bootstrap_scripts = list(
+            (config.base / "harness").rglob("*.py")
+        )
+
+        scan = {
+            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "run_id": logger.run_id,
+            "foundry_modules": [p.name for p in foundry_evo if p.name != "__init__.py"],
+            "bootstrap_scripts": [str(p.relative_to(config.base)) for p in bootstrap_scripts],
+            "pip_venv_packages": [],
+        }
+
+        # Probe pip venv for installable capabilities
+        dspy_py = config.dspy_python
+        if Path(dspy_py).is_file():
+            try:
+                pkg_result = subprocess.run(
+                    [dspy_py, "-m", "pip", "list", "--format=json"],
+                    capture_output=True, text=True, timeout=30,
+                    env={**os.environ, "LD_LIBRARY_PATH": os.environ.get("NIX_LD_LIBRARY_PATH", "")},
+                )
+                if pkg_result.returncode == 0:
+                    scan["pip_venv_packages"] = [
+                        p["name"] for p in json.loads(pkg_result.stdout)
+                    ][:50]
+            except Exception:
+                pass
+
+        scan_path.write_text(json.dumps(scan, indent=2, sort_keys=True), encoding="utf-8")
+        logger.emit("capability_scan_complete",
+            foundry=len(scan["foundry_modules"]),
+            bootstrap=len(scan["bootstrap_scripts"]),
+            venv=len(scan["pip_venv_packages"]),
+        )
+
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return StepResult(
+            step="capability_scan", status="failed", required=required,
+            returncode=1, stderr_tail=str(exc), duration_ms=duration_ms,
+        )
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    return StepResult(
+        step="capability_scan", status="success", required=required,
+        returncode=0, duration_ms=duration_ms,
+        stdout_tail=f"scan written: {scan_path}",
+    )
+
+
+_IN_PROCESS_HANDLERS = {
+    "session_seeder": _inproc_session_seeder,
+    "skill_manifest": _inproc_skill_manifest,
+    "self_test": _inproc_self_test,
+    "capability_scan": _inproc_capability_scan,
+}
+
+
+def _run_in_process(
+    handler_name: str,
+    config: Config,
+    logger: JsonlLogger,
+    *,
+    required: bool,
+) -> StepResult:
+    handler = _IN_PROCESS_HANDLERS.get(handler_name)
+    if handler is None:
+        return _skip(handler_name, f"unknown in-process handler: {handler_name}", logger=logger, required=required)
+    logger.emit("step_started", step=handler_name, required=required, cwd=str(config.foundry_repo))
+    result = handler(config, logger, required=required)
+    logger.emit(
+        "step_finished",
+        level="info" if result.status == "success" else "error",
+        step=handler_name,
+        status=result.status,
+        required=result.required,
+        returncode=result.returncode,
+        duration_ms=result.duration_ms,
+        stdout_tail=result.stdout_tail,
+        stderr_tail=result.stderr_tail,
+    )
+    return result
 
 
 def validate_config(config: Config) -> None:
@@ -531,7 +793,12 @@ def run(config: Config, logger: JsonlLogger) -> int:
     for step in config.steps:
         required = step in config.required_steps
         argv, cwd, skip_reason = _command_for_step(step, config)
-        if skip_reason:
+
+        # In-process self-expansion handlers
+        if skip_reason and skip_reason.startswith("__in_process__"):
+            handler_name = skip_reason.replace("__in_process__", "")
+            result = _run_in_process(handler_name, config, logger, required=required)
+        elif skip_reason:
             result = _skip(step, skip_reason, logger=logger, required=required)
         else:
             assert argv is not None
