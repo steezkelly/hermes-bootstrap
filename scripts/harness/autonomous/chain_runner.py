@@ -746,16 +746,22 @@ def _inproc_skill_manifest(config: Config, logger: JsonlLogger, required: bool) 
 def _inproc_self_test(config: Config, logger: JsonlLogger, required: bool) -> StepResult:
     """Run Foundry tests to validate pipeline health."""
     started = time.monotonic()
+    cache_dir = config.base / "cache" / "pytest"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Some test modules import dspy from the pip venv
+    venv_site = str(config.dspy_python.parent.parent / "lib" / "python3.11" / "site-packages")
+    py_path = ":".join([str(config.foundry_repo), venv_site])
     try:
-        # Suppress cache provider (Nix read-only cache dir causes rc=2)
-        # and pin --rootdir in case cwd resolution drifts.
         result = subprocess.run(
             [config.python_bin, "-m", "pytest", "tests/", "-q", "--tb=short",
-             "-p", "no:cacheprovider", "--rootdir", str(config.foundry_repo)],
+             "-p", "no:cacheprovider",
+             "-o", f"cache_dir={cache_dir}",
+             "--rootdir", str(config.foundry_repo)],
             cwd=config.foundry_repo,
             capture_output=True, text=True,
             timeout=config.timeout_seconds,
-            env={**os.environ, "PYTHONPATH": str(config.foundry_repo)},
+            env={**os.environ, "PYTHONPATH": py_path},
         )
         duration_ms = int((time.monotonic() - started) * 1000)
         status = "success" if result.returncode == 0 else "failed"

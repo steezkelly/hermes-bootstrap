@@ -430,6 +430,7 @@ let
       "/var/lib/hermes/harness"
       "/var/lib/hermes/events"
       "/var/lib/hermes/reports"
+      "/var/lib/hermes/cache"
     ];
     ReadOnlyPaths = [ "/var/lib/hermes/.hermes" ];
     InaccessiblePaths = [ "-/var/lib/hermes/secrets" ];
