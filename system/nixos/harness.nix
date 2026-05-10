@@ -444,6 +444,8 @@ let
     name = "hermes-autonomous-evolution-chain";
     runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
+      # Make system libs available to pip-installed native wheels (dspy -> numpy/tokenizers)
+      export LD_LIBRARY_PATH=''${NIX_LD_LIBRARY_PATH:-}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
       chain_runner=/var/lib/hermes/harness/autonomous/chain_runner.py
       if [ ! -f "$chain_runner" ]; then
         echo "Autonomous chain runner not found: $chain_runner" >&2
@@ -454,6 +456,10 @@ let
   };
 in
 {
+  # Enable nix-ld so pip-installed native wheels (dspy/numpy/tokenizers) can find
+  # libstdc++, libz, etc. at runtime via LD_LIBRARY_PATH.
+  programs.nix-ld.enable = true;
+
   users.users.hermes-harness = {
     isSystemUser = true;
     group = "hermes";
