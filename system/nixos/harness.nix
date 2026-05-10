@@ -332,6 +332,25 @@ let
       exec ${python}/bin/python3 ${harnessDir}/validate_foundry_gepa_bridge.py /var/lib/hermes/reports/evolution/gepa-bridge
     '';
   };
+  foundryObservatoryHealth = pkgs.writeShellApplication {
+    name = "hermes-evolution-foundry-observatory-health";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/run_foundry_observatory_health.py \
+        --foundry-repo /var/lib/hermes/foundry/hermes-agent-self-evolution \
+        --python-bin ${python}/bin/python3 \
+        --db-path /var/lib/hermes/reports/evolution/observatory/judge_audit_log.db \
+        --output /var/lib/hermes/reports/evolution/observatory/health.json
+    '';
+  };
+  validateFoundryObservatoryHealth = pkgs.writeShellApplication {
+    name = "hermes-validate-foundry-observatory-health";
+    runtimeInputs = [ python pkgs.coreutils ];
+    text = ''
+      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_observatory_health.py \
+        --report /var/lib/hermes/reports/evolution/observatory/health.json
+    '';
+  };
   commonServiceConfig = {
     User = "hermes-harness";
     Group = "hermes";
@@ -732,6 +751,29 @@ in
       ReadWritePaths = lib.mkForce [ ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/reports/evolution/gepa-bridge"
+      ];
+    };
+  };
+
+  systemd.services.hermes-evolution-foundry-observatory-health = {
+    description = "Run Foundry observatory health report on judge audit log";
+    after = [ "hermes-evolution-foundry-gepa-bridge.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${foundryObservatoryHealth}/bin/hermes-evolution-foundry-observatory-health";
+      ReadWritePaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution/observatory"
+      ];
+    };
+  };
+
+  systemd.services.hermes-validate-foundry-observatory-health = {
+    description = "Validate Foundry observatory health report boundaries";
+    after = [ "hermes-evolution-foundry-observatory-health.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${validateFoundryObservatoryHealth}/bin/hermes-validate-foundry-observatory-health";
+      ReadWritePaths = lib.mkForce [ ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution/observatory"
       ];
     };
   };
