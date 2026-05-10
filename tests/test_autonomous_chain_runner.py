@@ -267,6 +267,41 @@ class TestAutonomousChainRunnerScript:
         assert "bridge exploded" in bridge["stderr_tail"]
         assert any(e.get("event") == "run_finished" and e.get("status") == "failed" for e in events)
 
+    def test_self_test_uses_dspy_python_path_object_without_runner_exception(self, tmp_path):
+        base = tmp_path / "base"
+        sessions = _write_sessions(base, count=1)
+        foundry = _fake_foundry_repo(tmp_path, include_optional=False)
+        tests_dir = foundry / "tests"
+        tests_dir.mkdir()
+        (tests_dir / "test_smoke.py").write_text("def test_smoke():\n    assert True\n")
+        reports = base / "reports" / "evolution"
+        log_file = tmp_path / "self-test.jsonl"
+
+        result = subprocess.run(
+            [
+                sys.executable, str(SCRIPT),
+                "--base", str(base),
+                "--foundry-repo", str(foundry),
+                "--sessions-dir", str(sessions),
+                "--reports-dir", str(reports),
+                "--python-bin", sys.executable,
+                "--dspy-python", sys.executable,
+                "--log-file", str(log_file),
+                "--steps", "self_test",
+                "--force",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        events = _jsonl(log_file)
+        assert not any(e.get("event") == "runner_exception" for e in events)
+        self_test = [e for e in events if e.get("event") == "step_finished" and e.get("step") == "self_test"][0]
+        assert self_test["status"] == "success"
+        assert self_test["returncode"] == 0
+
     def test_skill_manifest_reads_optimizer_candidates_and_action_items(self, tmp_path):
         base = tmp_path / "base"
         sessions = _write_sessions(base, count=1)
