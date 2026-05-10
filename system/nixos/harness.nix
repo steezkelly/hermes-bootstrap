@@ -2,7 +2,7 @@
 
 let
   python = pkgs.python3;
-  pythonFoundry = pkgs.python3.withPackages (ps: [ ps.numpy ps.click ps.scikitlearn ]);
+  pythonFoundry = pkgs.python3.withPackages (ps: [ ps.numpy ps.click ps.scikitlearn ps.pytest ]);
   deployment = import ./deployment-options.nix;
   harnessDir = ../../scripts/harness;
   harnessBase = "/var/lib/hermes";
@@ -918,11 +918,13 @@ in
     serviceConfig = commonServiceConfig // {
       ExecStart = "${autonomousEvolutionChain}/bin/hermes-autonomous-evolution-chain";
       Environment = [ "NIX_LD_LIBRARY_PATH=/run/current-system/sw/share/nix-ld/lib" ];
-      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution" ];
+      ReadWritePaths = lib.mkForce [
+        "/var/lib/hermes/reports/evolution"
+        "/var/lib/hermes/.hermes/sessions"
+      ];
       ReadOnlyPaths = lib.mkForce [
         "/var/lib/hermes/foundry"
         "/var/lib/hermes/foundry-venv"
-        "/var/lib/hermes/.hermes/sessions"
       ];
       InaccessiblePaths = lib.mkForce [
         "-/var/lib/hermes/secrets"
