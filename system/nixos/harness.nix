@@ -916,9 +916,18 @@ in
   systemd.services.hermes-autonomous-evolution-chain = {
     description = "Run autonomous evolution chain on detected sessions";
     after = [ "hermes-agent.service" ];
+    environment = {
+      "HERMES_AGENT_REPO" = "/etc/nixos/hermes-agent-src";
+      "HERMES_HOME" = "/var/lib/hermes/.hermes";
+      "HOME" = "/var/lib/hermes";
+    };
     serviceConfig = commonServiceConfig // {
       ExecStart = "${autonomousEvolutionChain}/bin/hermes-autonomous-evolution-chain";
-      Environment = [ "NIX_LD_LIBRARY_PATH=/run/current-system/sw/share/nix-ld/lib" ];
+      Environment = [
+        "NIX_LD_LIBRARY_PATH=/run/current-system/sw/share/nix-ld/lib"
+        "HERMES_AGENT_REPO=/etc/nixos/hermes-agent-src"
+        "HERMES_HOME=/var/lib/hermes/.hermes"
+      ];
       ReadWritePaths = lib.mkForce [
         "/var/lib/hermes/reports/evolution"
         "/var/lib/hermes/.hermes/sessions"
