@@ -2,6 +2,7 @@
 
 let
   python = pkgs.python3;
+  pythonFoundry = pkgs.python3.withPackages (ps: [ ps.numpy ps.click ]);
   deployment = import ./deployment-options.nix;
   harnessDir = ../../scripts/harness;
   harnessBase = "/var/lib/hermes";
@@ -55,7 +56,7 @@ let
   };
   foundryActionRoutingFixture = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-action-routing-fixture";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
       foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
       if [ ! -d "$foundry_repo/evolution" ]; then
@@ -63,12 +64,12 @@ let
         exit 1
       fi
       cd "$foundry_repo"
-      exec ${python}/bin/python3 -m evolution.core.action_routing_demo --out /var/lib/hermes/reports/evolution/action-routing-fixture --mode fixture --no-network --no-external-writes
+      exec ${pythonFoundry}/bin/python3 -m evolution.core.action_routing_demo --out /var/lib/hermes/reports/evolution/action-routing-fixture --mode fixture --no-network --no-external-writes
     '';
   };
   provisionFoundryCheckout = pkgs.writeShellApplication {
     name = "hermes-provision-foundry-checkout";
-    runtimeInputs = [ python pkgs.coreutils pkgs.rsync pkgs.gnutar ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils pkgs.rsync pkgs.gnutar ];
     text = ''
       target=/var/lib/hermes/foundry/hermes-agent-self-evolution
       if [ -d "$target/evolution" ]; then
@@ -108,21 +109,21 @@ let
   };
   validateFoundryActionRoutingFixture = pkgs.writeShellApplication {
     name = "hermes-validate-foundry-action-routing-fixture";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_action_routing_fixture.py /var/lib/hermes/reports/evolution/action-routing-fixture
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/validate_foundry_action_routing_fixture.py /var/lib/hermes/reports/evolution/action-routing-fixture
     '';
   };
   validateFoundrySessionImportFixture = pkgs.writeShellApplication {
     name = "hermes-validate-foundry-session-import-fixture";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_session_import_fixture.py /var/lib/hermes/reports/evolution/session-import-fixture
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/validate_foundry_session_import_fixture.py /var/lib/hermes/reports/evolution/session-import-fixture
     '';
   };
   foundrySessionImportFixture = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-session-import-fixture";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
       foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
       if [ ! -d "$foundry_repo/evolution" ]; then
@@ -130,12 +131,12 @@ let
         exit 1
       fi
       cd "$foundry_repo"
-      exec ${python}/bin/python3 -m evolution.core.session_import_demo --out /var/lib/hermes/reports/evolution/session-import-fixture --mode fixture --no-network --no-external-writes
+      exec ${pythonFoundry}/bin/python3 -m evolution.core.session_import_demo --out /var/lib/hermes/reports/evolution/session-import-fixture --mode fixture --no-network --no-external-writes
     '';
   };
   foundryToolUnderuseFixture = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-tool-underuse-fixture";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
       foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
       if [ ! -d "$foundry_repo/evolution" ]; then
@@ -143,19 +144,19 @@ let
         exit 1
       fi
       cd "$foundry_repo"
-      exec ${python}/bin/python3 -m evolution.core.tool_underuse_demo --out /var/lib/hermes/reports/evolution/tool-underuse-fixture --mode fixture --no-network --no-external-writes
+      exec ${pythonFoundry}/bin/python3 -m evolution.core.tool_underuse_demo --out /var/lib/hermes/reports/evolution/tool-underuse-fixture --mode fixture --no-network --no-external-writes
     '';
   };
   validateFoundryToolUnderuseFixture = pkgs.writeShellApplication {
     name = "hermes-validate-foundry-tool-underuse-fixture";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_tool_underuse_fixture.py /var/lib/hermes/reports/evolution/tool-underuse-fixture
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/validate_foundry_tool_underuse_fixture.py /var/lib/hermes/reports/evolution/tool-underuse-fixture
     '';
   };
   foundrySkillDriftFixture = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-skill-drift-fixture";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
       foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
       if [ ! -d "$foundry_repo/evolution" ]; then
@@ -163,26 +164,26 @@ let
         exit 1
       fi
       cd "$foundry_repo"
-      exec ${python}/bin/python3 -m evolution.core.skill_drift_demo --out /var/lib/hermes/reports/evolution/skill-drift-fixture --mode fixture --no-network --no-external-writes
+      exec ${pythonFoundry}/bin/python3 -m evolution.core.skill_drift_demo --out /var/lib/hermes/reports/evolution/skill-drift-fixture --mode fixture --no-network --no-external-writes
     '';
   };
   validateFoundrySkillDriftFixture = pkgs.writeShellApplication {
     name = "hermes-validate-foundry-skill-drift-fixture";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_skill_drift_fixture.py /var/lib/hermes/reports/evolution/skill-drift-fixture
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/validate_foundry_skill_drift_fixture.py /var/lib/hermes/reports/evolution/skill-drift-fixture
     '';
   };
   promoteFoundryFixture = pkgs.writeShellApplication {
     name = "hermes-promote-foundry-fixture";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/promote_foundry_fixture.py "$@"
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/promote_foundry_fixture.py "$@"
     '';
   };
   foundryRealTraceIngestion = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-real-trace-ingestion";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
       foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
       if [ ! -d "$foundry_repo/evolution" ]; then
@@ -200,19 +201,19 @@ let
         exit 1
       fi
       cd "$foundry_repo"
-      exec ${python}/bin/python3 -m evolution.core.real_trace_ingestion --trace "$trace" --out /var/lib/hermes/reports/evolution/real-trace-ingestion --mode real_trace --no-network --no-external-writes
+      exec ${pythonFoundry}/bin/python3 -m evolution.core.real_trace_ingestion --trace "$trace" --out /var/lib/hermes/reports/evolution/real-trace-ingestion --mode real_trace --no-network --no-external-writes
     '';
   };
   validateFoundryRealTraceIngestion = pkgs.writeShellApplication {
     name = "hermes-validate-foundry-real-trace-ingestion";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_real_trace_ingestion.py /var/lib/hermes/reports/evolution/real-trace-ingestion
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/validate_foundry_real_trace_ingestion.py /var/lib/hermes/reports/evolution/real-trace-ingestion
     '';
   };
   foundryAttentionRouterBridge = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-attention-router-bridge";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
       foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
       if [ ! -d "$foundry_repo/evolution" ]; then
@@ -225,19 +226,19 @@ let
         exit 1
       fi
       cd "$foundry_repo"
-      exec ${python}/bin/python3 -m evolution.core.attention_router_bridge --input /var/lib/hermes/reports/evolution/real-trace-ingestion --out /var/lib/hermes/reports/evolution/attention-router-bridge --mode attention_router_bridge --no-network --no-external-writes
+      exec ${pythonFoundry}/bin/python3 -m evolution.core.attention_router_bridge --input /var/lib/hermes/reports/evolution/real-trace-ingestion --out /var/lib/hermes/reports/evolution/attention-router-bridge --mode attention_router_bridge --no-network --no-external-writes
     '';
   };
   validateFoundryAttentionRouterBridge = pkgs.writeShellApplication {
     name = "hermes-validate-foundry-attention-router-bridge";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_attention_router_bridge.py /var/lib/hermes/reports/evolution/attention-router-bridge
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/validate_foundry_attention_router_bridge.py /var/lib/hermes/reports/evolution/attention-router-bridge
     '';
   };
   foundryPipelineRunner = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-pipeline-runner";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
       foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
       if [ ! -d "$foundry_repo/evolution" ]; then
@@ -274,34 +275,34 @@ let
       fi
 
       cd "$foundry_repo"
-      exec ${python}/bin/python3 -m evolution.core.pipeline_runner "''${args[@]}"
+      exec ${pythonFoundry}/bin/python3 -m evolution.core.pipeline_runner "''${args[@]}"
     '';
   };
   validateFoundryPipelineRunner = pkgs.writeShellApplication {
     name = "hermes-validate-foundry-pipeline-runner";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_pipeline_runner.py /var/lib/hermes/reports/evolution/pipeline-runner
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/validate_foundry_pipeline_runner.py /var/lib/hermes/reports/evolution/pipeline-runner
     '';
   };
   sessionEndIngest = pkgs.writeShellApplication {
     name = "hermes-session-end-ingest";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
       export HERMES_HOME=/var/lib/hermes/.hermes
       export HOME=/var/lib/hermes
-      exec ${python}/bin/python3 ${harnessDir}/export_and_ingest_last_session.py \
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/export_and_ingest_last_session.py \
         --hermes-bin /run/current-system/sw/bin/hermes \
-        --python-bin ${python}/bin/python3 \
+        --python-bin ${pythonFoundry}/bin/python3 \
         --foundry-repo /var/lib/hermes/foundry/hermes-agent-self-evolution \
         --out /var/lib/hermes/reports/evolution/session-end-ingest
     '';
   };
   foundryTraceOptimizer = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-trace-optimizer";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/../repos/steezkelly-hermes-agent-self-evolution/evolution/core/trace_optimizer.py \
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/../repos/steezkelly-hermes-agent-self-evolution/evolution/core/trace_optimizer.py \
         --eval-examples /var/lib/hermes/reports/evolution/session-end-ingest/real_trace_ingestion/eval_examples.json \
         --out /var/lib/hermes/reports/evolution/trace-optimizer \
         --mode optimizer \
@@ -310,16 +311,16 @@ let
   };
   validateFoundryTraceOptimizer = pkgs.writeShellApplication {
     name = "hermes-validate-foundry-trace-optimizer";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_trace_optimizer.py /var/lib/hermes/reports/evolution/trace-optimizer
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/validate_foundry_trace_optimizer.py /var/lib/hermes/reports/evolution/trace-optimizer
     '';
   };
   foundryGepaBridge = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-gepa-bridge";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/../repos/steezkelly-hermes-agent-self-evolution/evolution/core/gepa_trace_bridge.py \
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/../repos/steezkelly-hermes-agent-self-evolution/evolution/core/gepa_trace_bridge.py \
         --candidate-artifacts /var/lib/hermes/reports/evolution/trace-optimizer/candidate_artifacts.json \
         --out /var/lib/hermes/reports/evolution/gepa-bridge \
         --no-network --no-external-writes
@@ -327,33 +328,33 @@ let
   };
   validateFoundryGepaBridge = pkgs.writeShellApplication {
     name = "hermes-validate-foundry-gepa-bridge";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_gepa_bridge.py /var/lib/hermes/reports/evolution/gepa-bridge
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/validate_foundry_gepa_bridge.py /var/lib/hermes/reports/evolution/gepa-bridge
     '';
   };
   foundryObservatoryHealth = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-observatory-health";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/run_foundry_observatory_health.py \
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/run_foundry_observatory_health.py \
         --foundry-repo /var/lib/hermes/foundry/hermes-agent-self-evolution \
-        --python-bin ${python}/bin/python3 \
+        --python-bin ${pythonFoundry}/bin/python3 \
         --db-path /var/lib/hermes/reports/evolution/observatory/judge_audit_log.db \
         --output /var/lib/hermes/reports/evolution/observatory/health.json
     '';
   };
   validateFoundryObservatoryHealth = pkgs.writeShellApplication {
     name = "hermes-validate-foundry-observatory-health";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_observatory_health.py \
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/validate_foundry_observatory_health.py \
         --report /var/lib/hermes/reports/evolution/observatory/health.json
     '';
   };
   foundryContentEvolution = pkgs.writeShellApplication {
     name = "hermes-evolution-foundry-content-evolution";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
       foundry_repo=/var/lib/hermes/foundry/hermes-agent-self-evolution
       if [ ! -f "$foundry_repo/evolution/skills/evolve_content.py" ]; then
@@ -389,7 +390,7 @@ let
 
       args=(
         --foundry-repo /var/lib/hermes/foundry/hermes-agent-self-evolution
-        --python-bin ${python}/bin/python3
+        --python-bin ${pythonFoundry}/bin/python3
         --skill "$skill"
         --output-dir /var/lib/hermes/reports/evolution/content-evolution
         --eval-source "$eval_source"
@@ -406,14 +407,14 @@ let
         args+=(--dry-run)
       fi
 
-      exec ${python}/bin/python3 ${harnessDir}/run_foundry_content_evolution.py "''${args[@]}"
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/run_foundry_content_evolution.py "''${args[@]}"
     '';
   };
   validateFoundryContentEvolution = pkgs.writeShellApplication {
     name = "hermes-validate-foundry-content-evolution";
-    runtimeInputs = [ python pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
     text = ''
-      exec ${python}/bin/python3 ${harnessDir}/validate_foundry_content_evolution.py \
+      exec ${pythonFoundry}/bin/python3 ${harnessDir}/validate_foundry_content_evolution.py \
         /var/lib/hermes/reports/evolution/content-evolution
     '';
   };
