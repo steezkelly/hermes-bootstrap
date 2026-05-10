@@ -453,6 +453,19 @@ in
     description = "Hermes Phase 2 delivery sender";
   };
 
+  autonomousEvolutionChain = pkgs.writeShellApplication {
+    name = "hermes-autonomous-evolution-chain";
+    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
+    text = ''
+      chain_runner=/var/lib/hermes/harness/autonomous/chain_runner.py
+      if [ ! -f "$chain_runner" ]; then
+        echo "Autonomous chain runner not found: $chain_runner" >&2
+        exit 1
+      fi
+      exec ${pythonFoundry}/bin/python3 "$chain_runner"
+    '';
+  };
+
   system.activationScripts.hermesHarnessDirectories = {
     deps = [ "users" ];
     text = ''
@@ -890,6 +903,32 @@ in
     };
   };
 
+
+  systemd.services.hermes-autonomous-evolution-chain = {
+    description = "Run autonomous evolution chain on detected sessions";
+    after = [ "hermes-agent.service" ];
+    serviceConfig = commonServiceConfig // {
+      ExecStart = "${autonomousEvolutionChain}/bin/hermes-autonomous-evolution-chain";
+      ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution" ];
+      ReadOnlyPaths = lib.mkForce [
+        "/var/lib/hermes/foundry"
+        "/var/lib/hermes/.hermes/sessions"
+      ];
+      InaccessiblePaths = lib.mkForce [
+        "-/var/lib/hermes/secrets"
+        "-/var/lib/hermes/.hermes/.env"
+      ];
+    };
+  };
+
+  systemd.timers.hermes-autonomous-evolution-chain = {
+    description = "Fire autonomous evolution chain every 30 minutes";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "2min";
+      OnUnitActiveSec = "30min";
+    };
+  };
   # Weekly dry-run of the full evolution pipeline: run all fixtures,
   # then validate all boundaries. Default disabled. No external writes.
   systemd.timers.hermes-evolution-foundry-weekly-dry-run = lib.mkIf deployment.evolutionFoundryTimerEnabled {
