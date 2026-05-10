@@ -366,7 +366,7 @@ def _relay_outbox(config: Config, logger: JsonlLogger) -> int:
     for msg_file in sorted(outbox.glob("*.json")):
         try:
             subprocess.run(
-                ["scp",
+                ["/run/current-system/sw/bin/scp",
                  "-o", "BatchMode=yes",
                  "-o", "ConnectTimeout=5",
                  "-o", "StrictHostKeyChecking=accept-new",
