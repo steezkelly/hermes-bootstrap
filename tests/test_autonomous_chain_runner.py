@@ -319,7 +319,8 @@ class TestAutonomousChainRunnerScript:
             "print('FAILED tests/core/test_capture_plugin.py::TestEndToEnd::test_deploy_updates_status')\n"
             "print('FAILED tests/core/test_observatory_logger.py::TestSingleton::test_singleton_same_db')\n"
             "print('FAILED tests/core/test_v2_dispatch.py::test_v2_dispatch_dry_run - FileNotFoundError: missing fixture')\n"
-            "print('8 failed, 1 passed in 0.12s')\n"
+            "print('FAILED tests/core/test_v2_dispatch.py::test_v2_dispatch_returns_report_type')\n"
+            "print('9 failed, 1 passed in 0.12s')\n"
             "raise SystemExit(1)\n"
         )
         fake_pytest.chmod(0o755)
@@ -350,9 +351,9 @@ class TestAutonomousChainRunnerScript:
         assert triage["external_writes_allowed"] is False
         assert triage["source_step"] == "self_test"
         assert triage["pytest_returncode"] == 1
-        assert triage["summary_counts"]["failed"] == 8
+        assert triage["summary_counts"]["failed"] == 9
         assert triage["bucket_counts"] == {
-            "environment_dependency": 2,
+            "environment_dependency": 3,
             "expected_fixture_constraint": 1,
             "real_regression": 3,
             "stale_test": 2,
@@ -365,7 +366,7 @@ class TestAutonomousChainRunnerScript:
             "stale_test",
         }
         assert any(
-            e.get("event") == "self_test_triage_written" and e.get("items") == 8
+            e.get("event") == "self_test_triage_written" and e.get("items") == 9
             for e in _jsonl(log_file)
         )
 

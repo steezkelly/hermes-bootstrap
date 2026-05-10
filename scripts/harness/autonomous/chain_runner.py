@@ -120,6 +120,7 @@ def _self_test_bucket(line: str) -> str:
         "filenotfou",
         "pytestcachewarning",
         "read-only file system",
+        "tests/core/test_v2_dispatch.py",
     )):
         return "environment_dependency"
     if "tests/core/test_constraints.py" in lower:
