@@ -45,6 +45,7 @@ DEFAULT_REQUIRED_STEPS = [
 ]
 VALID_STEPS = set(DEFAULT_STEPS)
 ENV_PREFIX = "HERMES_AUTONOMOUS_"
+RELAY_TARGET = os.environ.get(f"{ENV_PREFIX}RELAY_TARGET", "steve@192.168.1.168:/home/steve/.hermes/messages/inbox/")
 
 
 @dataclass(frozen=True)
@@ -250,6 +251,35 @@ def _load_state(path: Path, logger: JsonlLogger) -> dict[str, Any]:
         logger.emit("state_parse_failed", level="warning", path=str(path), error="state is not a JSON object")
         return {}
     return data
+
+
+def _relay_outbox(config: Config, logger: JsonlLogger) -> int:
+    """Push any outbox messages to the desktop inbox via SCP."""
+    outbox = config.base / "messages" / "outbox"
+    if not outbox.is_dir():
+        return 0
+
+    relayed = 0
+    for msg_file in sorted(outbox.glob("*.json")):
+        try:
+            subprocess.run(
+                ["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+                 str(msg_file), RELAY_TARGET],
+                check=True, capture_output=True, text=True, timeout=15,
+            )
+            relayed += 1
+            logger.emit("outbox_relayed", file=msg_file.name)
+            msg_file.unlink()  # remove after successful push
+        except subprocess.CalledProcessError as exc:
+            logger.emit("outbox_relay_failed", level="warning", file=msg_file.name,
+                        error=exc.stderr.strip())
+        except Exception as exc:
+            logger.emit("outbox_relay_failed", level="warning", file=msg_file.name,
+                        error=str(exc))
+
+    if relayed:
+        logger.emit("outbox_relay_summary", count=relayed)
+    return relayed
 
 
 def _write_state(path: Path, *, session_count: int, run_id: str, status: str) -> None:
@@ -662,24 +692,38 @@ def _inproc_skill_manifest(config: Config, logger: JsonlLogger, required: bool) 
         if action_path.is_file():
             actions = json.loads(action_path.read_text())
 
+        candidate_improvements: list[Any] = []
+        if isinstance(candidates, list):
+            candidate_improvements = candidates
+        elif isinstance(candidates, dict):
+            raw_candidates = candidates.get("candidates", candidates.get("improvements", []))
+            if isinstance(raw_candidates, list):
+                candidate_improvements = raw_candidates
+
+        action_items: list[Any] = []
+        if isinstance(actions, dict):
+            raw_actions = actions.get("action_items", actions.get("items", []))
+            if isinstance(raw_actions, list):
+                action_items = raw_actions
+
         manifest = {
             "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
             "run_id": logger.run_id,
             "source_candidates": candidate_path.name,
             "source_actions": action_path.name,
             "pending_skills": [],
-            "total_candidate_improvements": len(candidates) if isinstance(candidates, list) else 0,
+            "total_candidate_improvements": len(candidate_improvements),
         }
 
         # Derive skill suggestions from available data
-        if isinstance(actions, dict) and actions.get("action_items"):
-            for item in actions["action_items"]:
-                if isinstance(item, dict):
-                    manifest["pending_skills"].append({
-                        "title": item.get("title", item.get("finding", "unnamed")),
-                        "source": "attention_router",
-                        "suggested_skill_name": f"fix-{item.get('title', 'finding').replace(' ', '-').lower()[:40]}" if isinstance(item.get("title"), str) else "auto-fix",
-                    })
+        for item in action_items:
+            if isinstance(item, dict):
+                title = item.get("title", item.get("finding", "unnamed"))
+                manifest["pending_skills"].append({
+                    "title": title,
+                    "source": "attention_router",
+                    "suggested_skill_name": f"fix-{title.replace(' ', '-').lower()[:40]}" if isinstance(title, str) else "auto-fix",
+                })
 
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
         logger.emit("skill_manifest_written", path=str(manifest_path), pending=len(manifest["pending_skills"]))
@@ -703,8 +747,11 @@ def _inproc_self_test(config: Config, logger: JsonlLogger, required: bool) -> St
     """Run Foundry tests to validate pipeline health."""
     started = time.monotonic()
     try:
+        # Suppress cache provider (Nix read-only cache dir causes rc=2)
+        # and pin --rootdir in case cwd resolution drifts.
         result = subprocess.run(
-            [config.python_bin, "-m", "pytest", "tests/", "-q", "--tb=short"],
+            [config.python_bin, "-m", "pytest", "tests/", "-q", "--tb=short",
+             "-p", "no:cacheprovider", "--rootdir", str(config.foundry_repo)],
             cwd=config.foundry_repo,
             capture_output=True, text=True,
             timeout=config.timeout_seconds,
@@ -982,8 +1029,11 @@ def run(config: Config, logger: JsonlLogger) -> int:
         logger.emit("run_finished", level="error", status="failed", failed_step=failures[0].step)
         return 1
 
+    # Push any outbox messages to desktop inbox
+    relay_count = _relay_outbox(config, logger)
+
     _write_state(config.state_file, session_count=session_count, run_id=logger.run_id, status="success")
-    logger.emit("run_finished", status="success", session_count=session_count)
+    logger.emit("run_finished", status="success", session_count=session_count, outbox_relayed=relay_count)
     return 0
 
 
