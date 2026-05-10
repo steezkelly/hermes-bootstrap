@@ -439,19 +439,6 @@ let
     LockPersonality = true;
     CapabilityBoundingSet = "";
   };
-in
-{
-  users.users.hermes-harness = {
-    isSystemUser = true;
-    group = "hermes";
-    description = "Hermes node local observability harness";
-  };
-
-  users.users.hermes-delivery = {
-    isSystemUser = true;
-    group = "hermes";
-    description = "Hermes Phase 2 delivery sender";
-  };
 
   autonomousEvolutionChain = pkgs.writeShellApplication {
     name = "hermes-autonomous-evolution-chain";
@@ -464,6 +451,19 @@ in
       fi
       exec ${pythonFoundry}/bin/python3 "$chain_runner"
     '';
+  };
+in
+{
+  users.users.hermes-harness = {
+    isSystemUser = true;
+    group = "hermes";
+    description = "Hermes node local observability harness";
+  };
+
+  users.users.hermes-delivery = {
+    isSystemUser = true;
+    group = "hermes";
+    description = "Hermes Phase 2 delivery sender";
   };
 
   system.activationScripts.hermesHarnessDirectories = {
