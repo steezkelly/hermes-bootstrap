@@ -26,6 +26,7 @@ DEFAULT_SESSIONS_DIR = DEFAULT_BASE / ".hermes" / "sessions"
 DEFAULT_REPORTS_DIR = DEFAULT_BASE / "reports" / "evolution"
 DEFAULT_DSPY_PYTHON = Path("/var/lib/hermes/foundry-venv/bin/python")
 DEFAULT_STEPS = [
+    "self_model",
     "real_trace_ingestion",
     "attention_router_bridge",
     "trace_optimizer",
@@ -40,6 +41,7 @@ DEFAULT_REQUIRED_STEPS = [
     "real_trace_ingestion",
     "attention_router_bridge",
     "trace_optimizer",
+    "self_model",
 ]
 VALID_STEPS = set(DEFAULT_STEPS)
 ENV_PREFIX = "HERMES_AUTONOMOUS_"
@@ -485,6 +487,8 @@ def _command_for_step(step: str, config: Config) -> tuple[list[str] | None, Path
             None,
         )
     # ── Self-expansion steps (all in-process, no subprocess) ──
+    if step == "self_model":
+        return None, config.foundry_repo, "__in_process__self_model"
     if step == "session_seeder":
         return None, config.foundry_repo, "__in_process__session_seeder"
     if step == "skill_manifest":
@@ -501,37 +505,106 @@ def _command_for_step(step: str, config: Config) -> tuple[list[str] | None, Path
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _inproc_session_seeder(config: Config, logger: JsonlLogger, required: bool) -> StepResult:
-    """Generate diverse synthetic sessions as fuel for the next autonomous cycle."""
+    """Generate diverse synthetic sessions as fuel for the next autonomous cycle.
+
+    Reads live pipeline artifacts (action_queue, optimizer candidates, health)
+    to generate context-aware seed sessions instead of static templates.
+    """
     started = time.monotonic()
     sessions_dir = config.sessions_dir
     sessions_dir.mkdir(parents=True, exist_ok=True)
 
-    # Remove old seed sessions, keep original session_*.json only if they still exist
     existing = set(f.name for f in sessions_dir.glob("session_seed_*.json"))
     count = 0
+
     try:
-        seed_templates = [
+        # ── Read live pipeline artifacts ──
+        action_path = config.reports_dir / "attention-router-bridge" / "action_queue.json"
+        candidate_path = config.reports_dir / "trace-optimizer" / "candidate_artifacts.json"
+        health_path = config.reports_dir / "observatory" / "health.json"
+        scan_path = config.reports_dir / "expansion" / "capability_scan.json"
+
+        action_items = []
+        if action_path.is_file():
+            try:
+                aq = json.loads(action_path.read_text())
+                items = aq.get("action_items", aq if isinstance(aq, list) else [])
+                if isinstance(items, dict) and "items" in items:
+                    items = items["items"]
+                action_items = [i for i in items if isinstance(i, dict)][:5]
+            except Exception:
+                pass
+
+        candidate_failures = []
+        if candidate_path.is_file():
+            try:
+                ca = json.loads(candidate_path.read_text())
+                candidate_failures = ca.get("failure_classes", [])[:5]
+            except Exception:
+                pass
+
+        health_alerts = []
+        if health_path.is_file():
+            try:
+                h = json.loads(health_path.read_text())
+                health_alerts = h.get("alerts", [])[:3]
+            except Exception:
+                pass
+
+        venv_packages = []
+        if scan_path.is_file():
+            try:
+                cs = json.loads(scan_path.read_text())
+                venv_packages = cs.get("pip_venv_packages", [])[:20]
+            except Exception:
+                pass
+
+        # ── Build dynamic seed templates ──
+        seed_templates = []
+
+        # Base templates (always include — proven failure patterns)
+        base = [
             {
-                "tag": "silent-failure",
+                "tag": "hallucinated-claim",
                 "user": "create a backup of the config and verify it exists",
                 "assistant": "The backup has been created. (Note: no actual file was written — this is a hallucinated claim without verification.)",
             },
             {
-                "tag": "tool-misuse",
+                "tag": "knowledge-over-tool",
                 "user": "what files are in the home directory?",
                 "assistant": "Let me search my training data — based on typical Linux setups, you probably have .bashrc, .profile, .config/, Desktop/, Documents/. I can confirm this is accurate.",
             },
-            {
-                "tag": "over-answer",
-                "user": "what time is it?",
-                "assistant": "The current time is approximately 06:15 UTC. Let me also tell you about time zones: UTC is the primary time standard, established in 1960 and based on atomic clocks. Coordinated Universal Time is maintained by the Bureau International des Poids et Mesures. Your system likely uses the tzdata package version 2024b which includes recent changes to Kazakhstan time zones. NTP synchronization via systemd-timesyncd ensures millisecond accuracy by polling pool.ntp.org every 32 seconds with a root distance typically under 10ms.",
-            },
-            {
-                "tag": "no-verification",
-                "user": "deploy the latest bootstrap config to the mini-PC",
-                "assistant": "Deployed successfully. All services restarted. The system is now running the updated configuration. Everything is operational and the timer is active.",
-            },
         ]
+        seed_templates.extend(base)
+
+        # Dynamic templates from action queue
+        for item in action_items:
+            bucket = item.get("bucket", item.get("title", item.get("finding", "unknown")))
+            if isinstance(bucket, str) and len(bucket) > 5:
+                seed_templates.append({
+                    "tag": f"action-{bucket.replace(' ', '-').lower()[:30]}",
+                    "user": f"help me with: {bucket}",
+                    "assistant": f"I'd recommend addressing this by... (agent should actually use tools here, not speculate). Let me check the current state first.",
+                })
+
+        # Dynamic templates from observatory alerts
+        for alert in health_alerts:
+            code = alert.get("code", "UNKNOWN")
+            msg = alert.get("message", "")[:120]
+            seed_templates.append({
+                "tag": f"obs-{code.lower()}",
+                "user": f"the observatory reports: {msg}. what should we do?",
+                "assistant": "This is a health alert. Let me check the observatory DB directly and confirm whether the alert is actionable or a false positive before suggesting changes.",
+            })
+
+        # Template from capability discoveries
+        if venv_packages and len(venv_packages) > 10:
+            sample = ", ".join(venv_packages[:5])
+            seed_templates.append({
+                "tag": "capability-discovery",
+                "user": f"we have these pip packages available: {sample}. what could we build?",
+                "assistant": "Let me scan what each package actually provides and match against our current pipeline gaps. For example, if we have pandas we could add trend analysis to the observatory.",
+            })
 
         for i, template in enumerate(seed_templates):
             fname = f"session_seed_{template['tag']}_{uuid.uuid4().hex[:6]}.json"
@@ -543,6 +616,7 @@ def _inproc_session_seeder(config: Config, logger: JsonlLogger, required: bool) 
                 "session_id": f"seed-{template['tag']}-{uuid.uuid4().hex[:8]}",
                 "created": ts,
                 "tag": template["tag"],
+                "source": "dynamic-seeder",
                 "messages": [
                     {"role": "user", "content": template["user"]},
                     {"role": "assistant", "content": template["assistant"]},
@@ -559,11 +633,13 @@ def _inproc_session_seeder(config: Config, logger: JsonlLogger, required: bool) 
         )
 
     duration_ms = int((time.monotonic() - started) * 1000)
-    logger.emit("sessions_seeded", count=count, tags=[t["tag"] for t in seed_templates])
+    tags = [t["tag"] for t in seed_templates]
+    logger.emit("sessions_seeded", count=count, tags=tags,
+                action_items=len(action_items), health_alerts=len(health_alerts))
     return StepResult(
         step="session_seeder", status="success", required=required,
         returncode=0, duration_ms=duration_ms,
-        stdout_tail=f"seeded {count} sessions",
+        stdout_tail=f"seeded {count} dynamic sessions (actions={len(action_items)}, alerts={len(health_alerts)})",
     )
 
 
@@ -711,7 +787,94 @@ def _inproc_capability_scan(config: Config, logger: JsonlLogger, required: bool)
     )
 
 
+def _inproc_self_model(config: Config, logger: JsonlLogger, required: bool) -> StepResult:
+    """Build a self-describing state document from live pipeline artifacts.
+
+    Runs FIRST in each cycle so downstream steps (especially session_seeder)
+    know what was found in the previous cycle.
+    """
+    started = time.monotonic()
+    model_path = config.reports_dir / "self-model.json"
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        action_path = config.reports_dir / "attention-router-bridge" / "action_queue.json"
+        candidate_path = config.reports_dir / "trace-optimizer" / "candidate_artifacts.json"
+        health_path = config.reports_dir / "observatory" / "health.json"
+
+        def _maybe_read(path):
+            if not path.is_file():
+                return {}
+            try:
+                return json.loads(path.read_text())
+            except Exception:
+                return {}
+
+        actions = _maybe_read(action_path)
+        candidates = _maybe_read(candidate_path)
+        health = _maybe_read(health_path)
+
+        # Extract pending intentions from action queue
+        pending = []
+        action_items = []
+        if isinstance(actions, dict):
+            items = actions.get("action_items", actions if isinstance(actions, list) else [])
+            if isinstance(items, dict) and "items" in items:
+                items = items["items"]
+            for item in ([items] if isinstance(items, dict) else items):
+                if isinstance(item, dict):
+                    pending.append({
+                        "title": item.get("bucket", item.get("title", item.get("finding", str(item)[:80]))),
+                        "source": "attention_router",
+                    })
+
+        # Extract improvement candidates
+        improvements = []
+        if isinstance(candidates, dict):
+            failure_classes = candidates.get("failure_classes", [])
+            for fc in (failure_classes if isinstance(failure_classes, list) else []):
+                if isinstance(fc, (str, dict)):
+                    improvements.append(str(fc)[:120])
+
+        # Health snapshot
+        health_snapshot = {}
+        if isinstance(health, dict):
+            health_snapshot = {
+                "mean_score": health.get("mean_score"),
+                "dead_zone_fraction": health.get("dead_zone_fraction"),
+                "error_rate": health.get("error_rate"),
+                "alerts": [a.get("code") for a in health.get("alerts", []) if isinstance(a, dict)],
+            }
+
+        model = {
+            "cycle_id": logger.run_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "pending_intentions": pending,
+            "growth_candidates": improvements[:10],
+            "health_snapshot": health_snapshot,
+        }
+
+        model_path.write_text(json.dumps(model, indent=2, sort_keys=True), encoding="utf-8")
+        logger.emit("self_model_written", path=str(model_path),
+                    intentions=len(pending), candidates=len(improvements))
+
+    except Exception as exc:
+        duration_ms = int((time.monotonic() - started) * 1000)
+        return StepResult(
+            step="self_model", status="failed", required=required,
+            returncode=1, stderr_tail=str(exc), duration_ms=duration_ms,
+        )
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    return StepResult(
+        step="self_model", status="success", required=required,
+        returncode=0, duration_ms=duration_ms,
+        stdout_tail=f"self-model written: {model_path}",
+    )
+
+
 _IN_PROCESS_HANDLERS = {
+    "self_model": _inproc_self_model,
     "session_seeder": _inproc_session_seeder,
     "skill_manifest": _inproc_skill_manifest,
     "self_test": _inproc_self_test,
