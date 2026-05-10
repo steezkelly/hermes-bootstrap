@@ -443,7 +443,7 @@ let
 
   autonomousEvolutionChain = pkgs.writeShellApplication {
     name = "hermes-autonomous-evolution-chain";
-    runtimeInputs = [ pythonFoundry pkgs.coreutils ];
+    runtimeInputs = [ pythonFoundry pkgs.coreutils pkgs.openssh ];
     text = ''
       # Make system libs available to pip-installed native wheels (dspy -> numpy/tokenizers)
       export LD_LIBRARY_PATH=''${NIX_LD_LIBRARY_PATH:-}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}

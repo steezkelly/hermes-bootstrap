@@ -264,6 +264,7 @@ def _relay_outbox(config: Config, logger: JsonlLogger) -> int:
         try:
             subprocess.run(
                 ["scp", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+                 "-o", "StrictHostKeyChecking=accept-new",
                  str(msg_file), RELAY_TARGET],
                 check=True, capture_output=True, text=True, timeout=15,
             )
