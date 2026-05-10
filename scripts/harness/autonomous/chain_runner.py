@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -85,6 +86,97 @@ def _tail(text: str, limit: int = 2000) -> str:
     if len(text) <= limit:
         return text
     return text[-limit:]
+
+
+TRIAGE_BUCKETS = [
+    "environment_dependency",
+    "expected_fixture_constraint",
+    "real_regression",
+    "stale_test",
+    "unclassified",
+]
+
+
+def _pytest_summary_counts(output: str) -> dict[str, int]:
+    counts = {"failed": 0, "passed": 0, "skipped": 0, "warnings": 0, "errors": 0}
+    for raw_count, raw_key in re.findall(r"(\d+)\s+(failed|passed|skipped|warnings?|errors?)\b", output):
+        key = raw_key
+        if key == "warning":
+            key = "warnings"
+        elif key == "error":
+            key = "errors"
+        counts[key] = int(raw_count)
+    return counts
+
+
+def _self_test_bucket(line: str) -> str:
+    lower = line.lower()
+    if any(marker in lower for marker in (
+        "modulenotfounderror",
+        "importerror",
+        "no module named",
+        "permissionerror",
+        "pytestcachewarning",
+        "read-only file system",
+    )):
+        return "environment_dependency"
+    if "tests/core/test_constraints.py" in lower:
+        return "expected_fixture_constraint"
+    if "tests/core/test_v2_pipeline_integration.py" in lower:
+        return "real_regression"
+    if any(marker in lower for marker in (
+        "tests/tools/test_tool_description_evolution.py",
+        "tests/skills/test_content_evolver.py",
+        "tests/skills/test_evolve_skill_gates.py",
+        "tests/test_generate_report.py",
+    )):
+        return "stale_test"
+    return "unclassified"
+
+
+def _write_self_test_triage(config: Config, logger: JsonlLogger, result: subprocess.CompletedProcess[str]) -> Path:
+    output = "\n".join(part for part in [result.stdout, result.stderr] if part)
+    items: list[dict[str, Any]] = []
+    bucket_counts = {bucket: 0 for bucket in TRIAGE_BUCKETS}
+    for line in output.splitlines():
+        stripped = line.strip()
+        if not (stripped.startswith("FAILED ") or stripped.startswith("ERROR ")):
+            continue
+        kind, _, detail = stripped.partition(" ")
+        nodeid = detail.split(" - ", 1)[0].strip()
+        bucket = _self_test_bucket(stripped)
+        bucket_counts[bucket] += 1
+        items.append({
+            "kind": kind.lower(),
+            "nodeid": nodeid,
+            "bucket": bucket,
+            "line_tail": _tail(stripped, limit=500),
+        })
+
+    triage = {
+        "schema_version": 1,
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z"),
+        "run_id": logger.run_id,
+        "source_step": "self_test",
+        "pytest_returncode": result.returncode,
+        "summary_counts": _pytest_summary_counts(output),
+        "bucket_counts": bucket_counts,
+        "items": items,
+        "external_writes_allowed": False,
+        "network_allowed": False,
+        "github_writes_allowed": False,
+        "production_mutation_allowed": False,
+    }
+    triage_path = config.reports_dir / "expansion" / "self_test_triage.json"
+    triage_path.parent.mkdir(parents=True, exist_ok=True)
+    triage_path.write_text(json.dumps(triage, indent=2, sort_keys=True), encoding="utf-8")
+    logger.emit(
+        "self_test_triage_written",
+        path=str(triage_path),
+        items=len(items),
+        buckets=bucket_counts,
+    )
+    return triage_path
 
 
 def _parse_steps(value: Any) -> list[str]:
@@ -771,6 +863,7 @@ def _inproc_self_test(config: Config, logger: JsonlLogger, required: bool) -> St
         )
         duration_ms = int((time.monotonic() - started) * 1000)
         status = "success" if result.returncode == 0 else "failed"
+        _write_self_test_triage(config, logger, result)
         return StepResult(
             step="self_test", status=status, required=required,
             returncode=result.returncode, duration_ms=duration_ms,

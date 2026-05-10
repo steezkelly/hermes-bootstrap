@@ -302,6 +302,69 @@ class TestAutonomousChainRunnerScript:
         assert self_test["status"] == "success"
         assert self_test["returncode"] == 0
 
+    def test_self_test_writes_actionable_triage_artifact_for_failures(self, tmp_path):
+        base = tmp_path / "base"
+        sessions = _write_sessions(base, count=1)
+        foundry = _fake_foundry_repo(tmp_path, include_optional=False)
+        reports = base / "reports" / "evolution"
+        log_file = tmp_path / "self-test-triage.jsonl"
+        fake_pytest = tmp_path / "fake-pytest-python"
+        fake_pytest.write_text(
+            "#!/usr/bin/env python3\n"
+            "print('FAILED tests/tools/test_tool_description_evolution.py::TestToolDatasetBuilder::test_tool_filter')\n"
+            "print('ERROR tests/core/test_constraints.py::TestSizeConstraints::test_skill_under_limit')\n"
+            "print('ERROR tests/core/test_v2_pipeline_integration.py::TestFullPipeline::test_pipeline_accepts_improvement')\n"
+            "print('ERROR tests/core/test_bad_import.py::test_import - ModuleNotFoundError: No module named rich')\n"
+            "print('4 failed, 1 passed in 0.12s')\n"
+            "raise SystemExit(1)\n"
+        )
+        fake_pytest.chmod(0o755)
+
+        result = subprocess.run(
+            [
+                sys.executable, str(SCRIPT),
+                "--base", str(base),
+                "--foundry-repo", str(foundry),
+                "--sessions-dir", str(sessions),
+                "--reports-dir", str(reports),
+                "--python-bin", str(fake_pytest),
+                "--dspy-python", sys.executable,
+                "--log-file", str(log_file),
+                "--steps", "self_test",
+                "--force",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        triage_path = reports / "expansion" / "self_test_triage.json"
+        assert triage_path.is_file()
+        triage = json.loads(triage_path.read_text())
+        assert triage["schema_version"] == 1
+        assert triage["external_writes_allowed"] is False
+        assert triage["source_step"] == "self_test"
+        assert triage["pytest_returncode"] == 1
+        assert triage["summary_counts"]["failed"] == 4
+        assert triage["bucket_counts"] == {
+            "environment_dependency": 1,
+            "expected_fixture_constraint": 1,
+            "real_regression": 1,
+            "stale_test": 1,
+            "unclassified": 0,
+        }
+        assert {item["bucket"] for item in triage["items"]} == {
+            "environment_dependency",
+            "expected_fixture_constraint",
+            "real_regression",
+            "stale_test",
+        }
+        assert any(
+            e.get("event") == "self_test_triage_written" and e.get("items") == 4
+            for e in _jsonl(log_file)
+        )
+
     def test_skill_manifest_reads_optimizer_candidates_and_action_items(self, tmp_path):
         base = tmp_path / "base"
         sessions = _write_sessions(base, count=1)
