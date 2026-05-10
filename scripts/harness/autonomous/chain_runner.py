@@ -358,13 +358,25 @@ def _load_state(path: Path, logger: JsonlLogger) -> dict[str, Any]:
 
 
 def _relay_outbox(config: Config, logger: JsonlLogger) -> int:
-    """Push any outbox messages to the desktop inbox via SCP."""
+    """Optionally push outbox messages to the desktop inbox via SCP.
+
+    The autonomous evolution chain is local-only by default. Relay requires an
+    explicit `HERMES_AUTONOMOUS_RELAY_ENABLED=true` opt-in so a stray outbox file
+    cannot trigger network egress during self-expansion cycles.
+    """
     outbox = config.base / "messages" / "outbox"
     if not outbox.is_dir():
         return 0
 
+    pending = sorted(outbox.glob("*.json"))
+    if not pending:
+        return 0
+    if not _parse_bool(_env("RELAY_ENABLED") or False):
+        logger.emit("outbox_relay_skipped", reason="disabled", count=len(pending))
+        return 0
+
     relayed = 0
-    for msg_file in sorted(outbox.glob("*.json")):
+    for msg_file in pending:
         try:
             subprocess.run(
                 ["/run/current-system/sw/bin/scp",

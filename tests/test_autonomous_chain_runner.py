@@ -165,6 +165,25 @@ class TestAutonomousChainRunnerScript:
         assert (reports / "trace-optimizer" / "candidate_artifacts.json").is_file()
         assert json.loads((reports / "autonomous-state.json").read_text())["session_count"] == 2
 
+    def test_outbox_relay_is_disabled_by_default_for_local_only_chain(self, tmp_path):
+        base = tmp_path / "base"
+        outbox = base / "messages" / "outbox"
+        outbox.mkdir(parents=True)
+        (outbox / "test.json").write_text('{"from":"hermes-node","to":"mint"}\n')
+        log_file = tmp_path / "local-only-outbox.jsonl"
+
+        result = _run_chain(
+            tmp_path,
+            extra_args=["--base", str(base), "--log-file", str(log_file), "--steps", "self_model"],
+        )
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (outbox / "test.json").is_file()
+        events = _jsonl(log_file)
+        assert any(e.get("event") == "outbox_relay_skipped" and e.get("reason") == "disabled" for e in events)
+        assert not any(e.get("event") in {"outbox_relayed", "outbox_relay_failed"} for e in events)
+        assert any(e.get("event") == "run_finished" and e.get("outbox_relayed") == 0 for e in events)
+
     def test_json_config_and_env_override_paths(self, tmp_path):
         base = tmp_path / "base"
         sessions = _write_sessions(base, count=1)
