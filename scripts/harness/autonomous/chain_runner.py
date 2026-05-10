@@ -750,7 +750,8 @@ def _inproc_self_test(config: Config, logger: JsonlLogger, required: bool) -> St
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     # Some test modules import dspy from the pip venv
-    venv_site = str(config.dspy_python.parent.parent / "lib" / "python3.11" / "site-packages")
+    dspy_path = Path(config.dspy_python)
+    venv_site = str(dspy_path.parent.parent / "lib" / "python3.11" / "site-packages")
     py_path = ":".join([str(config.foundry_repo), venv_site])
     try:
         result = subprocess.run(
