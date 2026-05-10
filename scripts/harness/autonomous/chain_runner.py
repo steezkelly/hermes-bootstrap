@@ -118,6 +118,7 @@ def _pytest_summary_counts(output: str) -> dict[str, int]:
 
 def _self_test_bucket(line: str) -> str:
     lower = line.lower()
+    # ── Environment dependency: env broken, not code broken ──
     if any(marker in lower for marker in (
         "modulenotfounderror",
         "importerror",
@@ -130,27 +131,52 @@ def _self_test_bucket(line: str) -> str:
         "tests/core/test_v2_dispatch.py",
     )):
         return "environment_dependency"
-    if "tests/core/test_constraints.py" in lower:
-        return "expected_fixture_constraint"
-    if "tests/core/test_v2_pipeline_integration.py" in lower:
-        return "real_regression"
+    # ── Known stale / broken test files ──
     if any(marker in lower for marker in (
-        "safety flag",
-        "safety disabled",
-        "tests/core/test_trace_optimizer.py",
-        "tests/core/test_gepa_trace_bridge.py",
-        "tests/core/test_observatory_logger.py",
-    )):
-        return "real_regression"
-    if any(marker in lower for marker in (
+        "tests/core/test_constraints.py",
         "tests/core/test_capture_plugin.py",
         "tests/tools/test_tool_description_evolution.py",
         "tests/skills/test_content_evolver.py",
         "tests/skills/test_evolve_skill_gates.py",
         "tests/test_generate_report.py",
+        "tests/core/test_observatory_logger.py",
+        "tests/core/test_observatory.py",
+        "tests/core/test_gepa_trace_bridge.py",
     )):
         return "stale_test"
+    # ── Real regressions: broken pipeline logic or missing safety flags ──
+    if any(marker in lower for marker in (
+        "safety flag",
+        "safety disabled",
+        "tests/core/test_trace_optimizer.py",
+        "tests/core/test_v2_pipeline_integration.py",
+    )):
+        return "real_regression"
     return "unclassified"
+
+
+def _root_cause_and_action(kind: str, line_tail: str) -> tuple[str, str]:
+    """Extract a human-readable root cause hint and suggested first action."""
+    tail = line_tail.lower()
+    if "modulenotfounderror" in tail or "no module named" in tail:
+        if any(p in tail for p in ("numpy", "pandas", "sklearn", "dspy", "rich", "click", "pytest")):
+            return "missing pip package", "pip install <package> in the pip venv; update bootstrap if it recurs"
+        return "import failed during test execution", "check PYTHONPATH and whether the module is installed in the test venv"
+    if "permissionerror" in tail or "read-only file system" in tail:
+        return "filesystem permission denied", "check that the test is not trying to write outside its sandbox; mock filesystem if needed"
+    if "filenotfounderror" in tail or "filenotfou" in tail:
+        return "required fixture or resource missing", "verify the test fixture path resolves; check if the file is symlinked correctly"
+    if "safety flag" in tail or "safety disabled" in tail:
+        return "pipeline security guard missing or bypassed", "add the missing safety flag to the CLI argument parser; verify all security options are guarded"
+    if "timeout" in tail:
+        return "test or subprocess timed out", "increase timeout_seconds in chain_runner; check for deadlocks in the pipeline step"
+    if "assertionerror" in tail:
+        return "assertion failed — logic bug or wrong expectation", "read the full assertion; check if the test or the code it tests changed recently"
+    if "connectionerror" in tail or "httperror" in tail:
+        return "network call failed during test", "mock external HTTP calls; the test should not make real network requests"
+    if "typeerror" in tail:
+        return "Python type mismatch", "check recent changes to function signatures; validate input types at entry points"
+    return "unknown failure", "run the test manually with --tb=long to see full traceback"
 
 
 def _write_self_test_triage(config: Config, logger: JsonlLogger, result: subprocess.CompletedProcess[str]) -> Path:
@@ -206,35 +232,51 @@ def _action_title_for_nodeid(nodeid: str) -> str:
 
 def _write_self_test_action_queue(config: Config, logger: JsonlLogger) -> Path:
     triage_path = config.reports_dir / "expansion" / "self_test_triage.json"
+    if not triage_path.is_file():
+        raise FileNotFoundError(f"triage artifact not found: {triage_path}")
+
     triage = json.loads(triage_path.read_text(encoding="utf-8"))
     raw_items = triage.get("items", [])
     if not isinstance(raw_items, list):
         raw_items = []
 
     order = {bucket: idx for idx, bucket in enumerate(ACTIONABLE_TRIAGE_BUCKETS)}
-    actionable: list[tuple[int, int, dict[str, Any]]] = []
+
+    # ── Deduplicate by nodeid (keep first occurrence) ──
+    seen_nodeids: set[str] = set()
+    deduped: list[tuple[int, int, dict[str, Any]]] = []
     for idx, item in enumerate(raw_items):
         if not isinstance(item, dict):
             continue
         bucket = str(item.get("bucket", ""))
         if bucket not in order:
             continue
-        actionable.append((order[bucket], idx, item))
-    actionable.sort(key=lambda record: (record[0], record[1]))
+        nodeid = str(item.get("nodeid", ""))
+        if nodeid in seen_nodeids:
+            continue
+        seen_nodeids.add(nodeid)
+        deduped.append((order[bucket], idx, item))
+
+    deduped.sort(key=lambda record: (record[0], record[1]))
 
     queue_items: list[dict[str, Any]] = []
-    for queue_idx, (_, _, item) in enumerate(actionable, start=1):
+    for queue_idx, (_, _, item) in enumerate(deduped, start=1):
         bucket = str(item.get("bucket", "unclassified"))
         nodeid = str(item.get("nodeid", "unknown"))
+        kind = item.get("kind", "unknown")
+        tail = str(item.get("line_tail", ""))
+        root_cause, suggested = _root_cause_and_action(kind, tail)
         queue_items.append({
             "id": f"self-test-{queue_idx:02d}",
             "title": _action_title_for_nodeid(nodeid),
             "action_type": "investigate_self_test_failure",
             "priority": TRIAGE_PRIORITY.get(bucket, "P3"),
             "bucket": bucket,
-            "kind": item.get("kind", "unknown"),
+            "kind": kind,
             "nodeid": nodeid,
-            "evidence_tail": _tail(str(item.get("line_tail", "")), limit=500),
+            "evidence_tail": _tail(tail, limit=500),
+            "root_cause_hint": root_cause,
+            "suggested_action": suggested,
             "source_triage_run_id": triage.get("run_id"),
             "external_writes_allowed": False,
             "network_allowed": False,
@@ -251,9 +293,12 @@ def _write_self_test_action_queue(config: Config, logger: JsonlLogger) -> Path:
         "source_triage": str(triage_path),
         "source_triage_run_id": triage.get("run_id"),
         "selection_policy": "real_regression_then_environment_then_unclassified",
+        "deduplication": "by_nodeid_keep_first",
         "bucket_counts": triage.get("bucket_counts", {}),
         "items": queue_items,
         "total_actionable_items": len(queue_items),
+        "total_raw_items": len(raw_items),
+        "duplicates_removed": len(raw_items) - len(queue_items),
         "external_writes_allowed": False,
         "network_allowed": False,
         "github_writes_allowed": False,
@@ -267,6 +312,7 @@ def _write_self_test_action_queue(config: Config, logger: JsonlLogger) -> Path:
         path=str(queue_path),
         source_triage=str(triage_path),
         items=len(queue_items),
+        duplicates_removed=len(raw_items) - len(queue_items),
         policy=queue["selection_policy"],
     )
     return queue_path
@@ -1042,11 +1088,22 @@ def _inproc_skill_manifest(config: Config, logger: JsonlLogger, required: bool) 
     )
 
 
+def _python_for_venv(config: Config) -> str:
+    """Return the foundry venv python (has pytest/dspy), falling back to configured python."""
+    venv_python = str(config.base / "foundry-venv" / "bin" / "python")
+    if Path(venv_python).is_file():
+        return venv_python
+    return config.python_bin
+
+
 def _inproc_self_test(config: Config, logger: JsonlLogger, required: bool) -> StepResult:
     """Run Foundry tests to validate pipeline health."""
     started = time.monotonic()
     cache_dir = config.base / "cache" / "pytest"
     cache_dir.mkdir(parents=True, exist_ok=True)
+
+    # Use foundry-venv python (has pytest + dspy) instead of system python
+    python_bin = _python_for_venv(config)
 
     # Some test modules import dspy from the pip venv
     dspy_path = Path(config.dspy_python)
@@ -1054,7 +1111,7 @@ def _inproc_self_test(config: Config, logger: JsonlLogger, required: bool) -> St
     py_path = ":".join([str(config.foundry_repo), venv_site])
     try:
         result = subprocess.run(
-            [config.python_bin, "-m", "pytest", "tests/", "-q", "--tb=short",
+            [python_bin, "-m", "pytest", "tests/", "-q", "--tb=short",
              "-p", "no:cacheprovider",
              "-o", f"cache_dir={cache_dir}",
              "--rootdir", str(config.foundry_repo)],
