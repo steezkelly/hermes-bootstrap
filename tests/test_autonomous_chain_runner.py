@@ -267,6 +267,56 @@ class TestAutonomousChainRunnerScript:
         assert "bridge exploded" in bridge["stderr_tail"]
         assert any(e.get("event") == "run_finished" and e.get("status") == "failed" for e in events)
 
+    def test_skill_manifest_reads_optimizer_candidates_and_action_items(self, tmp_path):
+        base = tmp_path / "base"
+        sessions = _write_sessions(base, count=1)
+        foundry = _fake_foundry_repo(tmp_path)
+        reports = base / "reports" / "evolution"
+        (reports / "trace-optimizer").mkdir(parents=True)
+        (reports / "attention-router-bridge").mkdir(parents=True)
+        (reports / "trace-optimizer" / "candidate_artifacts.json").write_text(json.dumps({
+            "schema_version": 1,
+            "candidates": [
+                {"failure_class": "long_briefing_instead_of_concise_action_queue"},
+                {"failure_class": "agent_describes_instead_of_calls_tools"},
+            ],
+            "external_writes_allowed": False,
+        }))
+        (reports / "attention-router-bridge" / "action_queue.json").write_text(json.dumps({
+            "schema_version": 1,
+            "items": [
+                {"title": "Convert long briefing trace into one action item"},
+                {"title": "Patch tool-underuse behavior from trace evidence"},
+            ],
+            "external_writes_allowed": False,
+        }))
+        log_file = tmp_path / "manifest.jsonl"
+
+        result = subprocess.run(
+            [
+                sys.executable, str(SCRIPT),
+                "--base", str(base),
+                "--foundry-repo", str(foundry),
+                "--sessions-dir", str(sessions),
+                "--reports-dir", str(reports),
+                "--python-bin", sys.executable,
+                "--log-file", str(log_file),
+                "--steps", "skill_manifest",
+                "--force",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        manifest = json.loads((reports / "expansion" / "skill_manifest.json").read_text())
+        assert manifest["total_candidate_improvements"] == 2
+        assert [item["source"] for item in manifest["pending_skills"]] == ["attention_router", "attention_router"]
+        assert {item["title"] for item in manifest["pending_skills"]} == {
+            "Convert long briefing trace into one action item",
+            "Patch tool-underuse behavior from trace evidence",
+        }
+
 
 class TestAutonomousChainNixContract:
     def test_binding_points_at_runtime_script_and_uses_foundry_python(self):
@@ -289,9 +339,15 @@ class TestAutonomousChainNixContract:
         start = text.index("systemd.services.hermes-autonomous-evolution-chain")
         end = text.index("systemd.timers.hermes-autonomous-evolution-chain")
         service = text[start:end]
-        assert 'ReadWritePaths = lib.mkForce [ "/var/lib/hermes/reports/evolution" ]' in service
-        assert '"/var/lib/hermes/foundry"' in service
+        assert 'ReadWritePaths = lib.mkForce [' in service
+        assert '"/var/lib/hermes/reports/evolution"' in service
         assert '"/var/lib/hermes/.hermes/sessions"' in service
+        assert '"/var/lib/hermes/foundry"' in service
+        assert '"/var/lib/hermes/foundry-venv"' in service
+        readonly_start = service.index("ReadOnlyPaths = lib.mkForce [")
+        inaccessible_start = service.index("InaccessiblePaths = lib.mkForce [")
+        readonly_block = service[readonly_start:inaccessible_start]
+        assert '"/var/lib/hermes/.hermes/sessions"' not in readonly_block
         assert '"-/var/lib/hermes/secrets"' in service
         assert '"-/var/lib/hermes/.hermes/.env"' in service
         assert "EnvironmentFile" not in service
@@ -300,5 +356,5 @@ class TestAutonomousChainNixContract:
         timer = text[end:]
         timer = timer[: timer.find("systemd.", 1) if timer.find("systemd.", 1) != -1 else len(timer)]
         assert "wantedBy = [ \"timers.target\" ]" in timer
-        assert "OnBootSec = \"2min\"" in timer
-        assert "OnUnitActiveSec = \"30min\"" in timer
+        assert "OnBootSec = \"1min\"" in timer
+        assert "OnUnitActiveSec = \"3min\"" in timer
